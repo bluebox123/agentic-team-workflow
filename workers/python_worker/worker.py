@@ -875,18 +875,12 @@ def run_summarizer(task_id, job_id, payload):
     requests.post(
         f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
         json={
-            # Keep summary at top-level for templates: {{tasks.summarizer_node.outputs.summary}}
-            # Also expose an "outputs" shape for any legacy templates: {{tasks.summarizer.outputs.summary}}
             "result": {
                 "ok": True,
                 "job_id": job_id,
                 "executor": "summarizer",
                 "summary": summary,
-                "original_length": original_length,
-                "outputs": {
-                    "summary": summary,
-                    "original_length": original_length,
-                },
+                "original_length": original_length
             },
             "artifact": {"type": "json", "filename": "summary.json", "storage_key": object_key}
         },
@@ -1178,10 +1172,14 @@ Provide a 2-3 sentence summary of what this webpage contains."""
     requests.post(
         f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
         json={
-            # IMPORTANT: the backend template resolver treats task.result.result || task.result
-            # as the source for {{tasks.X.outputs.*}}.
-            # So, for the scraper, store the scraped payload at the top-level result.
-            "result": scraped_data,
+            "result": {
+                "ok": True, 
+                "job_id": job_id, 
+                "executor": "scraper",
+                "text": "\n".join(scraped_data.get("sample_data", [])) if isinstance(scraped_data.get("sample_data"), list) else str(scraped_data),
+                "html": response.text if 'response' in locals() else "",
+                "result": scraped_data  # For backward compatibility with templates expecting .result
+            },
             "artifact": {"type": "json", "filename": "scrape.json", "storage_key": object_key}
         },
         timeout=5,
