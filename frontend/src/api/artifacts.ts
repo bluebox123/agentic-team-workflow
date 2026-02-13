@@ -1,4 +1,5 @@
 import { api } from "./client";
+import { API_BASE_URL } from "../config";
 
 export interface Artifact {
   id: string;
@@ -89,20 +90,5 @@ export async function fetchFrozenArtifacts(jobId: string): Promise<{
 }
 
 export function getArtifactDownloadUrl(artifactId: string): string {
-  return `http://localhost:4000/api/artifacts/${artifactId}/download`;
-}
-
-export async function fetchArtifactText(artifactId: string): Promise<string> {
-  const res = await api.get(`/artifacts/${artifactId}/download`, {
-    responseType: "text",
-    transformResponse: (r) => r,
-  });
-  return res.data as unknown as string;
-}
-
-export async function fetchArtifactBlob(artifactId: string): Promise<Blob> {
-  const res = await api.get(`/artifacts/${artifactId}/download`, {
-    responseType: "blob",
-  });
-  return res.data as Blob;
+  return `${API_BASE_URL}/artifacts/${artifactId}/download`;
 }
