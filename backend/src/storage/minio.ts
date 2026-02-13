@@ -6,7 +6,7 @@ import https from "https";
 
 // Custom HTTPS agent for Supabase S3 compatibility
 const httpsAgent = new https.Agent({
-  rejectUnauthorized: true,
+  rejectUnauthorized: process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0", // Allow disabling for Supabase S3 issues
   secureProtocol: "TLSv1_2_method",
   ciphers: "DEFAULT@SECLEVEL=1",
 });
