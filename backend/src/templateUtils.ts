@@ -35,7 +35,9 @@ export async function resolveTaskInputs(
         // The result from DB might be: { result: actualData } or actualData directly
         const rawResult = row.result ? (row.result.result || row.result) : {};
         
-        console.log(`[TEMPLATE] Task '${row.name}': raw result = ${JSON.stringify(rawResult).substring(0, 200)}`);
+        console.log(`[TEMPLATE] Task '${row.name}': result type=${typeof row.result}, has result.result=${!!row.result?.result}`);
+        console.log(`[TEMPLATE] Task '${row.name}': raw result keys=${Object.keys(rawResult).join(', ')}`);
+        console.log(`[TEMPLATE] Task '${row.name}': text present=${'text' in rawResult}, text length=${rawResult.text?.length || 0}`);
         
         // Store the outputs with the raw result data
         // This ensures tasks.X.outputs.result works if the data has a result field
@@ -65,11 +67,12 @@ export function substitute(obj: any, context: any): any {
         // We'll support simple dot notation
         return obj.replace(/\{\{([\w\.]+)\}\}/g, (match, path) => {
             const val = getPath(context, path);
-            if (val !== undefined) {
+            console.log(`[TEMPLATE] Looking up path '${path}', got type=${typeof val}, value=${JSON.stringify(val)?.substring(0, 50)}`);
+            if (val !== undefined && val !== null && val !== '') {
                 console.log(`[TEMPLATE] Resolved {{${path}}} -> ${String(val).substring(0, 50)}`);
                 return String(val);
             } else {
-                console.log(`[TEMPLATE] NOT FOUND: {{${path}}} - keeping original`);
+                console.log(`[TEMPLATE] NOT FOUND or EMPTY: {{${path}}} - val=${JSON.stringify(val)} - keeping original`);
                 return match; // keep original if not found
             }
         });
