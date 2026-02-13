@@ -18,6 +18,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # copy worker code
-COPY worker.py ai_helper.py .env ./
+COPY worker.py ai_helper.py ./
 
+# Use environment variables provided by the platform (no local .env needed)
 CMD ["sh", "-c", "python worker.py || sleep 1000"]
