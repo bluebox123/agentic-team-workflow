@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: ai_workflow_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devuser -d ai_workflow_dev"]
+      interval: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 10s
+      retries: 10
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  python-worker:
+    build: ../workers/python_worker
+    depends_on:
+      - postgres
+      - rabbitmq
+    environment:
+      DATABASE_URL: postgres://devuser:devpass@postgres:5432/ai_workflow_dev
+      RABBIT_URL: amqp://guest:guest@rabbitmq:5672/
+      ORCHESTRATOR_URL: http://host.docker.internal:4000
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: artifacts
+      # AI API Keys
+      GEMINI_API_KEY: AIzaSyCUHB2jgFLSV65fOKyK_Yy8qO3a_9y8XXY
+      GEMINI_MODEL: gemini-2.0-flash-exp
+      SAMBANOVA_API_KEY: a9b0b0b0-53b5-446d-8f78-b6fc59f49a88
+      SAMBANOVA_BASE_URL: https://api.sambanova.ai/v1
+      SAMBANOVA_MODEL: deepseek-r1-distill-llama-70b
+
+volumes:
+  postgres-data:
+  minio-data:

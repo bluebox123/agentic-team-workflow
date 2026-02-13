@@ -1,0 +1,13 @@
+pika
+psycopg2-binary
+requests
+python-dotenv
+prometheus_client
+Minio
+weasyprint
+matplotlib
+google-generativeai
+openai
+beautifulsoup4
+lxml
+tenacity

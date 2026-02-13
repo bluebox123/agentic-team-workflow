@@ -1,0 +1,609 @@
+[
+  {
+    "prompt": "Scrape https://example.com",
+    "success": true,
+    "canExecute": true,
+    "nodeCount": 1,
+    "agentTypes": [
+      "scraper"
+    ],
+    "errors": [],
+    "workflow": {
+      "nodes": [
+        {
+          "id": "scrape",
+          "agentType": "scraper",
+          "inputs": {
+            "url": "https://example.com"
+          },
+          "dependencies": [],
+          "outputMapping": {}
+        }
+      ],
+      "edges": [],
+      "executionOrder": [
+        "scrape"
+      ]
+    }
+  },
+  {
+    "prompt": "Summarize the following text: 'Artificial Intelligence is transforming industries...'",
+    "success": true,
+    "canExecute": true,
+    "nodeCount": 1,
+    "agentTypes": [
+      "summarizer"
+    ],
+    "errors": [],
+    "workflow": {
+      "nodes": [
+        {
+          "id": "summarizer_node",
+          "agentType": "summarizer",
+          "inputs": {
+            "text": "Artificial Intelligence is transforming industries..."
+          },
+          "dependencies": [],
+          "outputMapping": {}
+        }
+      ],
+      "edges": [],
+      "executionOrder": [
+        "summarizer_node"
+      ]
+    }
+  },
+  {
+    "prompt": "Analyze this dataset: [1, 2, 3, 4, 5, 10, 20, 30]",
+    "success": true,
+    "canExecute": true,
+    "nodeCount": 1,
+    "agentTypes": [
+      "analyzer"
+    ],
+    "errors": [],
+    "workflow": {
+      "nodes": [
+        {
+          "id": "analyzer_node",
+          "agentType": "analyzer",
+          "inputs": {
+            "data": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              10,
+              20,
+              30
+            ],
+            "analysis_type": "summary"
+          },
+          "dependencies": [],
+          "outputMapping": {}
+        }
+      ],
+      "edges": [],
+      "executionOrder": [
+        "analyzer_node"
+      ]
+    }
+  },
+  {
+    "prompt": "Send an email notification to admin@example.com saying the task is complete",
+    "success": true,
+    "canExecute": true,
+    "nodeCount": 1,
+    "agentTypes": [
+      "notifier"
+    ],
+    "errors": [],
+    "workflow": {
+      "nodes": [
+        {
+          "id": "notify",
+          "agentType": "notifier",
+          "inputs": {
+            "message": "the task is complete",
+            "channel": "email",
+            "recipient": "admin@example.com"
+          },
+          "dependencies": [],
+          "outputMapping": {}
+        }
+      ],
+      "edges": [],
+      "executionOrder": [
+        "notify"
+      ]
+    }
+  },
+  {
+    "prompt": "Scrape https://news.ycombinator.com and summarize the content",
+    "success": true,
+    "canExecute": true,
+    "nodeCount": 2,
+    "agentTypes": [
+      "scraper",
+      "summarizer"
+    ],
+    "errors": [],
+    "workflow": {
+      "nodes": [
+        {
+          "id": "scraper_node",
+          "agentType": "scraper",
+          "inputs": {
+            "url": "https://news.ycombinator.com"
+          },
+          "dependencies": [],
+          "outputMapping": {}
+        },
+        {
+          "id": "summarizer_node",
+          "agentType": "summarizer",
+          "inputs": {
+            "text": "{{tasks.scraper_node.outputs.text}}"
+          },
+          "dependencies": [
+            "scraper_node"
+          ],
+          "outputMapping": {}
+        }
+      ],
+      "edges": [
+        {
+          "from": "scraper_node",
+          "to": "summarizer_node"
+        }
+      ],
+      "executionOrder": [
+        "scraper_node",
+        "summarizer_node"
+      ]
+    }
+  },
+  {
+    "prompt": "Fetch user data and validate it against our schema",
+    "success": true,
+    "canExecute": false,
+    "nodeCount": 0,
+    "agentTypes": [],
+    "errors": [
+      "The request is incomplete and ambiguous. To create a valid DAG, I need clarification on: (1) Where is the user data located? (Provide a URL for the scraper, or specify if data should be provided directly.) (2) What is the validation schema? (Provide the validation rules as a JSON object.) Without these details, I cannot map the request to available agents."
+    ],
+    "workflow": null
+  },
+  {
+    "prompt": "Generate a bar chart showing sales data: Q1=100, Q2=150, Q3=200, Q4=250",
+    "success": true,
+    "canExecute": true,
+    "nodeCount": 2,
+    "agentTypes": [
+      "transformer",
+      "chart"
+    ],
+    "errors": [],
+    "workflow": {
+      "nodes": [
+        {
+          "id": "data_transformer",
+          "agentType": "transformer",
+          "inputs": {
+            "data": {
+              "quarters": [
+                "Q1",
+                "Q2",
+                "Q3",
+                "Q4"
+              ],
+              "sales": [
+                100,
+                150,
+                200,
+                250
+              ]
+            },
+            "transform": "uppercase"
+          },
+          "dependencies": [],
+          "outputMapping": {}
+        },
+        {
+          "id": "chart_generator",
+          "agentType": "chart",
+          "inputs": {
+            "title": "Sales Data by Quarter",
+            "type": "bar",
+            "x": "{{tasks.data_transformer.outputs.result.quarters}}",
+            "y": "{{tasks.data_transformer.outputs.result.sales}}",
+            "x_label": "Quarter",
+            "y_label": "Sales",
+            "role": "chart"
+          },
+          "dependencies": [
+            "data_transformer"
+          ],
+          "outputMapping": {}
+        }
+      ],
+      "edges": [
+        {
+          "from": "data_transformer",
+          "to": "chart_generator"
+        }
+      ],
+      "executionOrder": [
+        "data_transformer",
+        "chart_generator"
+      ]
+    }
+  },
+  {
+    "prompt": "Analyze website traffic data [100, 200, 150, 300] and send a notification with insights",
+    "success": true,
+    "canExecute": true,
+    "nodeCount": 2,
+    "agentTypes": [
+      "analyzer",
+      "notifier"
+    ],
+    "errors": [],
+    "workflow": {
+      "nodes": [
+        {
+          "id": "analyze_node",
+          "agentType": "analyzer",
+          "inputs": {
+            "data": [
+              100,
+              200,
+              150,
+              300
+            ],
+            "analysis_type": "summary"
+          },
+          "dependencies": [],
+          "outputMapping": {}
+        },
+        {
+          "id": "notify_node",
+          "agentType": "notifier",
+          "inputs": {
+            "message": "{{tasks.analyze_node.outputs.insights}}",
+            "channel": "email",
+            "recipient": "user@example.com"
+          },
+          "dependencies": [
+            "analyze_node"
+          ],
+          "outputMapping": {}
+        }
+      ],
+      "edges": [
+        {
+          "from": "analyze_node",
+          "to": "notify_node"
+        }
+      ],
+      "executionOrder": [
+        "analyze_node",
+        "notify_node"
+      ]
+    }
+  },
+  {
+    "prompt": "Scrape https://example.com/data, analyze the numbers, and create a report with charts",
+    "success": true,
+    "canExecute": true,
+    "nodeCount": 4,
+    "agentTypes": [
+      "scraper",
+      "analyzer",
+      "chart",
+      "designer"
+    ],
+    "errors": [],
+    "workflow": {
+      "nodes": [
+        {
+          "id": "scraper_node",
+          "agentType": "scraper",
+          "inputs": {
+            "url": "https://example.com/data"
+          },
+          "dependencies": [],
+          "outputMapping": {}
+        },
+        {
+          "id": "analyzer_node",
+          "agentType": "analyzer",
+          "inputs": {
+            "data": "{{tasks.scraper_node.outputs.text}}",
+            "analysis_type": "summary"
+          },
+          "dependencies": [
+            "scraper_node"
+          ],
+          "outputMapping": {}
+        },
+        {
+          "id": "chart_node",
+          "agentType": "chart",
+          "inputs": {
+            "title": "Data Analysis Report",
+            "type": "bar",
+            "x": "{{tasks.analyzer_node.outputs.stats}}",
+            "y": "{{tasks.analyzer_node.outputs.stats}}",
+            "x_label": "Categories",
+            "y_label": "Values",
+            "role": "analyst"
+          },
+          "dependencies": [
+            "analyzer_node"
+          ],
+          "outputMapping": {}
+        },
+        {
+          "id": "report_node",
+          "agentType": "designer",
+          "inputs": {
+            "title": "Data Analysis Report",
+            "sections": [
+              {
+                "heading": "Analysis Summary",
+                "content": "{{tasks.analyzer_node.outputs.insights}}"
+              },
+              {
+                "heading": "Visual Analysis",
+                "artifact": "{{tasks.chart_node.outputs.image_url}}"
+              }
+            ]
+          },
+          "dependencies": [
+            "analyzer_node",
+            "chart_node"
+          ],
+          "outputMapping": {}
+        }
+      ],
+      "edges": [
+        {
+          "from": "scraper_node",
+          "to": "analyzer_node"
+        },
+        {
+          "from": "analyzer_node",
+          "to": "chart_node"
+        },
+        {
+          "from": "analyzer_node",
+          "to": "report_node"
+        },
+        {
+          "from": "chart_node",
+          "to": "report_node"
+        }
+      ],
+      "executionOrder": [
+        "scraper_node",
+        "analyzer_node",
+        "chart_node",
+        "report_node"
+      ]
+    }
+  },
+  {
+    "prompt": "Fetch product data, validate it, transform to uppercase, and generate a summary report",
+    "success": true,
+    "canExecute": false,
+    "nodeCount": 0,
+    "agentTypes": [],
+    "errors": [
+      "The request lacks critical details such as the URL or source for fetching product data, validation rules, and specifics for the summary report. Available agents require these inputs (e.g., scraper needs 'url', validator needs 'rules')."
+    ],
+    "workflow": null
+  },
+  {
+    "prompt": "Scrape competitor website, summarize findings, create a chart, and compile a PDF report",
+    "success": true,
+    "canExecute": false,
+    "nodeCount": 0,
+    "agentTypes": [],
+    "errors": [
+      "User request cannot be executed because it lacks a specific competitor website URL, which is required for the scraper agent."
+    ],
+    "workflow": null
+  },
+  {
+    "prompt": "Get data from API, analyze trends, validate quality, and notify stakeholders with results",
+    "success": true,
+    "canExecute": false,
+    "nodeCount": 0,
+    "agentTypes": [],
+    "errors": [
+      "No agent available to fetch data from an API. The scraper agent requires a URL and extracts web content, but cannot handle API requests with authentication, parameters, or structured data responses."
+    ],
+    "workflow": null
+  },
+  {
+    "prompt": "Create a comprehensive sales report with multiple charts and summaries",
+    "success": true,
+    "canExecute": false,
+    "nodeCount": 0,
+    "agentTypes": [],
+    "errors": [
+      "The user request lacks specific data sources (e.g., URLs for sales data) or details needed to generate charts and summaries. Available agents require concrete inputs like URLs, numeric data arrays, or text, which are not provided."
+    ],
+    "workflow": null
+  },
+  {
+    "prompt": "Perform AI transformation on customer feedback data and generate insights",
+    "success": true,
+    "canExecute": false,
+    "nodeCount": 0,
+    "agentTypes": [],
+    "errors": [
+      "The request lacks specific customer feedback data or source (e.g., URL, raw data). No input data is provided to perform transformation or generate insights."
+    ],
+    "workflow": null
+  },
+  {
+    "prompt": "Validate user input data and create detailed quality report",
+    "success": true,
+    "canExecute": false,
+    "nodeCount": 0,
+    "agentTypes": [],
+    "errors": [
+      "User request lacks specific user input data to validate and specific validation rules, which are required inputs for the validator agent. No concrete data or rules provided to create a functional workflow."
+    ],
+    "workflow": null
+  },
+  {
+    "prompt": "Scrape multiple data sources, consolidate, analyze, and create executive summary PDF",
+    "success": true,
+    "canExecute": true,
+    "nodeCount": 7,
+    "agentTypes": [
+      "scraper",
+      "scraper",
+      "scraper",
+      "executor",
+      "executor",
+      "summarizer",
+      "designer"
+    ],
+    "errors": [],
+    "workflow": {
+      "nodes": [
+        {
+          "id": "scraper_node_1",
+          "agentType": "scraper",
+          "inputs": {
+            "url": "https://example.com/source1"
+          },
+          "dependencies": [],
+          "outputMapping": {}
+        },
+        {
+          "id": "scraper_node_2",
+          "agentType": "scraper",
+          "inputs": {
+            "url": "https://example.com/source2"
+          },
+          "dependencies": [],
+          "outputMapping": {}
+        },
+        {
+          "id": "scraper_node_3",
+          "agentType": "scraper",
+          "inputs": {
+            "url": "https://example.com/source3"
+          },
+          "dependencies": [],
+          "outputMapping": {}
+        },
+        {
+          "id": "consolidator_node",
+          "agentType": "executor",
+          "inputs": {
+            "instruction": "Consolidate and merge the following scraped content into a unified dataset",
+            "context": "Source 1: {{tasks.scraper_node_1.outputs.text}}\nSource 2: {{tasks.scraper_node_2.outputs.text}}\nSource 3: {{tasks.scraper_node_3.outputs.text}}"
+          },
+          "dependencies": [
+            "scraper_node_1",
+            "scraper_node_2",
+            "scraper_node_3"
+          ],
+          "outputMapping": {}
+        },
+        {
+          "id": "analyzer_node",
+          "agentType": "executor",
+          "inputs": {
+            "instruction": "Perform comprehensive statistical and trend analysis on the consolidated data",
+            "context": "{{tasks.consolidator_node.outputs.result}}"
+          },
+          "dependencies": [
+            "consolidator_node"
+          ],
+          "outputMapping": {}
+        },
+        {
+          "id": "summarizer_node",
+          "agentType": "summarizer",
+          "inputs": {
+            "text": "{{tasks.analyzer_node.outputs.result}}",
+            "max_sentences": 10
+          },
+          "dependencies": [
+            "analyzer_node"
+          ],
+          "outputMapping": {}
+        },
+        {
+          "id": "designer_node",
+          "agentType": "designer",
+          "inputs": {
+            "title": "Executive Summary Report",
+            "sections": [
+              {
+                "heading": "Overview",
+                "content": "{{tasks.summarizer_node.outputs.summary}}"
+              },
+              {
+                "heading": "Detailed Analysis",
+                "content": "{{tasks.analyzer_node.outputs.result}}"
+              }
+            ]
+          },
+          "dependencies": [
+            "summarizer_node",
+            "analyzer_node"
+          ],
+          "outputMapping": {}
+        }
+      ],
+      "edges": [
+        {
+          "from": "scraper_node_1",
+          "to": "consolidator_node"
+        },
+        {
+          "from": "scraper_node_2",
+          "to": "consolidator_node"
+        },
+        {
+          "from": "scraper_node_3",
+          "to": "consolidator_node"
+        },
+        {
+          "from": "consolidator_node",
+          "to": "analyzer_node"
+        },
+        {
+          "from": "analyzer_node",
+          "to": "summarizer_node"
+        },
+        {
+          "from": "summarizer_node",
+          "to": "designer_node"
+        },
+        {
+          "from": "analyzer_node",
+          "to": "designer_node"
+        }
+      ],
+      "executionOrder": [
+        "scraper_node_1",
+        "scraper_node_2",
+        "scraper_node_3",
+        "consolidator_node",
+        "analyzer_node",
+        "summarizer_node",
+        "designer_node"
+      ]
+    }
+  }
+]

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.log
+.env
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
+.idea/
+
+backend/.env
+
+workers/python_worker/.env

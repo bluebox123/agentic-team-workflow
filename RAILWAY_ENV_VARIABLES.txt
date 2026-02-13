@@ -1,0 +1,63 @@
+================================================================================
+RAILWAY ENVIRONMENT VARIABLES - COPY ALL OF THESE TO BOTH SERVICES
+================================================================================
+
+Add these to BOTH the backend service AND the python-worker service in Railway.
+
+In Railway Dashboard:
+1. Click on your service (backend or python-worker)
+2. Go to "Variables" tab
+3. Click "New Variable" 
+4. Copy each line below (format: KEY=VALUE)
+5. Repeat for the other service
+
+================================================================================
+
+DATABASE_URL=YOUR_DATABASE_URL_HERE
+
+RABBIT_URL=YOUR_RABBITMQ_URL_HERE
+
+PORT=4000
+
+NODE_ENV=production
+
+JWT_SECRET=YOUR_JWT_SECRET_HERE
+
+MINIO_ENDPOINT=YOUR_SUPABASE_STORAGE_ENDPOINT_HERE
+
+MINIO_ACCESS_KEY=YOUR_SUPABASE_ACCESS_KEY_HERE
+
+MINIO_SECRET_KEY=YOUR_SUPABASE_SECRET_KEY_HERE
+
+MINIO_BUCKET=artifacts
+
+MINIO_USE_SSL=true
+
+MINIO_PORT=443
+
+GEMINI_API_KEY=YOUR_GEMINI_API_KEY_HERE
+
+GEMINI_MODEL=gemini-2.0-flash-exp
+
+PPLX_API_KEY=YOUR_PPLX_API_KEY_HERE
+
+PPLX_MODEL=sonar-pro
+
+SAMBANOVA_API_KEY=YOUR_SAMBANOVA_API_KEY_HERE
+
+SAMBANOVA_BASE_URL=https://api.sambanova.ai/v1
+
+SAMBANOVA_MODEL=deepseek-r1-distill-llama-70b
+
+================================================================================
+TOTAL: 18 variables to add to each service
+================================================================================
+
+IMPORTANT NOTES:
+- Add these to BOTH services (backend AND python-worker)
+- Railway tip: After adding to one service, you can use "Copy variables from" 
+  to copy them to the other service automatically
+- Make sure there are NO extra spaces before or after the = sign
+- The % signs in DATABASE_URL are correct - that's URL encoding for the @ symbol
+
+================================================================================
