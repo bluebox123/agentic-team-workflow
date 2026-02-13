@@ -15,8 +15,19 @@ function createS3Client(): S3Client | null {
   }
 
   // Build the full endpoint URL
+  // Support both full URLs (with path) and hostname-only endpoints
   const protocol = useSSL ? "https" : "http";
-  const fullEndpoint = endpoint.startsWith("http") ? endpoint : `${protocol}://${endpoint}`;
+  let fullEndpoint: string;
+  if (endpoint.startsWith("http")) {
+    // Full URL provided - use as-is (e.g., https://project.supabase.co/storage/v1/s3)
+    fullEndpoint = endpoint;
+  } else if (endpoint.includes(".storage.supabase.co")) {
+    // Supabase storage subdomain - convert to S3 API path
+    fullEndpoint = `https://${endpoint}/storage/v1/s3`;
+  } else {
+    // Hostname only - add protocol
+    fullEndpoint = `${protocol}://${endpoint}`;
+  }
 
   return new S3Client({
     endpoint: fullEndpoint,
