@@ -1195,6 +1195,10 @@ def handle_message(ch, method, properties, body):
     payload = json.loads(body)
     task_id = payload["task_id"]
     job_id = payload.get("job_id")
+    
+    # Use the resolved payload from the message (NOT from database)
+    # The backend resolves {{tasks.X.outputs.Y}} templates before enqueueing
+    task_payload_from_message = payload.get("payload", {})
 
     print(f"[WORKER] Received task {task_id}", flush=True)
 
@@ -1205,6 +1209,14 @@ def handle_message(ch, method, properties, body):
         log_task(task_id, "ERROR", "Task not found in DB")
         ch.basic_ack(delivery_tag=method.delivery_tag)
         return
+    
+    # Prefer resolved payload from message over database payload
+    # The message contains template-resolved values, DB has original templates
+    if task_payload_from_message:
+        print(f"[WORKER] Using resolved payload from message (keys: {list(task_payload_from_message.keys())})")
+        task_payload_db = task_payload_from_message
+    else:
+        print(f"[WORKER] Warning: No payload in message, using DB payload (may have unresolved templates)")
 
     # Acquire ownership
     try:
