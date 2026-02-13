@@ -8,13 +8,7 @@ import time
 from typing import Optional, Dict, Any
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-# Try to import Perplexity client
-try:
-    from perplexity import Perplexity
-    PERPLEXITY_AVAILABLE = True
-except ImportError:
-    PERPLEXITY_AVAILABLE = False
-    print("[AI_HELPER] WARNING: perplexity library not installed")
+AI_PROVIDER = os.getenv("AI_PROVIDER", "perplexity").strip().lower()
 
 # Try to import Gemini
 try:
@@ -41,11 +35,11 @@ _last_gemini_call = 0
 _last_sambanova_call = 0
 RATE_LIMIT_DELAY = 1.0  # seconds between calls
 
-# Initialize Perplexity client
+# Initialize Perplexity client (OpenAI-compatible)
 perplexity_client = None
-if PERPLEXITY_AVAILABLE and PPLX_API_KEY:
+if PPLX_API_KEY:
     try:
-        perplexity_client = Perplexity()
+        perplexity_client = OpenAI(api_key=PPLX_API_KEY, base_url="https://api.perplexity.ai")
         print("[AI_HELPER] Perplexity initialized")
     except Exception as e:
         print(f"[AI_HELPER] Perplexity init failed: {e}")
@@ -62,6 +56,14 @@ sambanova_client = None
 if SAMBANOVA_API_KEY:
     sambanova_client = OpenAI(api_key=SAMBANOVA_API_KEY, base_url=SAMBANOVA_BASE_URL)
     print("[AI_HELPER] SambaNova initialized")
+
+print(
+    "[AI_HELPER] Provider config: "
+    f"AI_PROVIDER={AI_PROVIDER}, "
+    f"perplexity={'on' if bool(PPLX_API_KEY) else 'off'}, "
+    f"gemini={'on' if (GEMINI_AVAILABLE and bool(GEMINI_API_KEY)) else 'off'}, "
+    f"sambanova={'on' if bool(SAMBANOVA_API_KEY) else 'off'}"
+)
 
 
 class AIException(Exception):
@@ -100,10 +102,14 @@ def generate_with_perplexity(prompt: str, preset: str = "pro-search", max_tokens
     _wait_for_rate_limit("perplexity")
     
     try:
-        response = perplexity_client.responses.create(preset=preset, input=prompt)
-        if not response or not response.output_text:
+        response = perplexity_client.chat.completions.create(
+            model=preset,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = (response.choices[0].message.content or "").strip()
+        if not content:
             raise AIException("Empty response from Perplexity")
-        return response.output_text.strip()
+        return content
     except Exception as e:
         error_msg = str(e).lower()
         if "rate" in error_msg or "quota" in error_msg or "429" in error_msg:
@@ -154,6 +160,12 @@ def generate_with_sambanova(prompt: str, temperature: float = 0.7, max_tokens: i
 
 
 def generate_ai_response(prompt: str, task_type: str = "general", prefer_perplexity: bool = True, temperature: float = 0.7, max_tokens: int = 2000) -> str:
+    if AI_PROVIDER == "perplexity":
+        if not perplexity_client:
+            raise AIException("AI_PROVIDER=perplexity but Perplexity client not configured (check PPLX_API_KEY and dependency install)")
+        print(f"[AI_HELPER] Using Perplexity for {task_type} task")
+        return generate_with_perplexity(prompt, max_tokens=max_tokens)
+
     if prefer_perplexity and perplexity_client:
         providers = ["perplexity", "sambanova", "gemini"]
     else:

@@ -6,9 +6,7 @@ prometheus_client
 boto3
 weasyprint
 matplotlib
-google-generativeai
 openai
 beautifulsoup4
 lxml
 tenacity
-perplexity
