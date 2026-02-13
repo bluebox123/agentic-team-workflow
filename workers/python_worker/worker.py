@@ -5,12 +5,9 @@ import psycopg2
 import pika
 import sys
 import requests
-import ssl
-import urllib3
 from dotenv import load_dotenv
 from prometheus_client import Counter, start_http_server
 import boto3
-from botocore.config import Config
 from botocore.exceptions import ClientError
 import io
 from weasyprint import HTML
@@ -60,28 +57,13 @@ else:
 
 print(f"[WORKER] S3 endpoint configured: {endpoint_url}")
 
-# Create custom SSL context for Supabase compatibility
-ssl_context = ssl.create_default_context()
-ssl_context.check_hostname = False
-ssl_context.verify_mode = ssl.CERT_NONE
-
-# Custom botocore config with relaxed SSL settings
-botocore_config = Config(
-    retries={'max_attempts': 3, 'mode': 'adaptive'},
-    connect_timeout=10,
-    read_timeout=30,
-    parameter_validation=False,
-)
-
 # Initialize S3 client (compatible with Supabase Storage and MinIO)
 s3_client = boto3.client(
     "s3",
     endpoint_url=endpoint_url,
     aws_access_key_id=MINIO_ACCESS_KEY,
     aws_secret_access_key=MINIO_SECRET_KEY,
-    region_name=MINIO_REGION,
-    config=botocore_config,
-    verify=False  # Disable SSL verification for Supabase compatibility
+    region_name=MINIO_REGION
 )
 
 TASK_QUEUE = "executor.tasks"
@@ -1152,7 +1134,7 @@ Provide a 2-3 sentence summary of what this webpage contains."""
                 "selector": selector or "all paragraphs",
                 "items_found": len(items),
                 "sample_data": items[:5],  # First 5 items
-                "text": "\n".join(items),  # Full extracted text for template resolution
+                "text": "\n".join(items),  # Full text for template resolution
                 "ai_summary": ai_summary,
                 "status": "completed",
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")

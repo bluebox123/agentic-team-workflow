@@ -5,14 +5,10 @@ import { NodeHttpHandler } from "@smithy/node-http-handler";
 import https from "https";
 
 // Custom HTTPS agent for Supabase S3 compatibility
-// Using more permissive settings to handle SSL handshake issues
 const httpsAgent = new https.Agent({
-  rejectUnauthorized: false, // Allow self-signed certs (Supabase S3 compatibility)
-  secureProtocol: undefined, // Let Node.js negotiate the best TLS version
-  ciphers: "ALL:@SECLEVEL=0", // Most permissive cipher suite
-  keepAlive: true,
-  keepAliveMsecs: 1000,
-  maxSockets: 50,
+  rejectUnauthorized: true,
+  secureProtocol: "TLSv1_2_method",
+  ciphers: "DEFAULT@SECLEVEL=1",
 });
 
 // Parse endpoint for S3-compatible services (Supabase, MinIO, etc.)
