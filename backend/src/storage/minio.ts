@@ -40,6 +40,10 @@ export async function ensureBucket() {
   }
 
   try {
+    // Log the endpoint for debugging
+    console.log(`[STORAGE DEBUG] Attempting S3 connection to endpoint: ${process.env.MINIO_ENDPOINT}`);
+    console.log(`[STORAGE DEBUG] Bucket: ${BUCKET}`);
+    
     // For Supabase, just verify we can connect by listing buckets
     // The bucket must already exist in Supabase Storage UI
     const response = await client.send(new ListBucketsCommand({}));
@@ -58,6 +62,19 @@ export async function ensureBucket() {
   } catch (err: any) {
     storageAvailable = false;
     console.error("S3 connection failed:", err.message);
+    
+    // Log the raw response for debugging
+    if (err.$response) {
+      console.error("[STORAGE DEBUG] Raw response status:", err.$response.statusCode);
+      console.error("[STORAGE DEBUG] Raw response headers:", err.$response.headers);
+      try {
+        const body = await err.$response.body.transformToString();
+        console.error("[STORAGE DEBUG] Raw response body:", body.substring(0, 500));
+      } catch (e) {
+        console.error("[STORAGE DEBUG] Could not read response body");
+      }
+    }
+    
     throw err;
   }
 }
