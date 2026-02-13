@@ -45,7 +45,17 @@ MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")
 
 # Build endpoint URL
 protocol = "https" if MINIO_USE_SSL else "http"
-endpoint_url = MINIO_ENDPOINT if MINIO_ENDPOINT.startswith("http") else f"{protocol}://{MINIO_ENDPOINT}"
+if MINIO_ENDPOINT.startswith("http"):
+    # Full URL provided - use as-is
+    endpoint_url = MINIO_ENDPOINT
+elif ".storage.supabase.co" in MINIO_ENDPOINT:
+    # Supabase storage subdomain - convert to S3 API path
+    endpoint_url = f"https://{MINIO_ENDPOINT}/storage/v1/s3"
+else:
+    # Hostname only - add protocol
+    endpoint_url = f"{protocol}://{MINIO_ENDPOINT}"
+
+print(f"[WORKER] S3 endpoint configured: {endpoint_url}")
 
 # Initialize S3 client (compatible with Supabase Storage and MinIO)
 s3_client = boto3.client(
