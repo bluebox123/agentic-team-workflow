@@ -12,6 +12,7 @@
     "@aws-sdk/lib-storage": "^3.989.0",
     "@google/generative-ai": "^0.24.1",
     "@smithy/node-http-handler": "^4.4.10",
+    "@supabase/supabase-js": "^2.95.3",
     "@types/amqplib": "^0.10.8",
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.17",

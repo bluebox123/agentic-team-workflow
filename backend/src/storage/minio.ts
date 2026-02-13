@@ -5,6 +5,7 @@ import { NodeHttpHandler } from "@smithy/node-http-handler";
 import https from "https";
 import { request as httpsRequest } from "https";
 import { URL } from "url";
+import { createClient } from "@supabase/supabase-js";
 
 // Custom HTTPS agent for Supabase S3 compatibility
 const httpsAgent = new https.Agent({
@@ -12,6 +13,47 @@ const httpsAgent = new https.Agent({
   secureProtocol: "TLSv1_2_method",
   ciphers: "DEFAULT@SECLEVEL=1",
 });
+
+function isSupabaseS3Endpoint(endpoint: string | undefined): boolean {
+  if (!endpoint) return false;
+  return endpoint.includes(".storage.supabase.co") || endpoint.includes("/storage/v1/s3");
+}
+
+function getSupabaseRestConfig(): { url: string; serviceRoleKey: string; bucket: string } | null {
+  const url = process.env.SUPABASE_URL?.trim();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const bucket = process.env.MINIO_BUCKET || "artifacts";
+
+  if (!url || !serviceRoleKey) return null;
+  return { url, serviceRoleKey, bucket };
+}
+
+async function getObjectStreamViaSupabaseRest(storageKey: string): Promise<Readable> {
+  const cfg = getSupabaseRestConfig();
+  if (!cfg) {
+    throw new Error("Supabase REST download not configured (set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)");
+  }
+
+  // Use service role key server-side only.
+  const supabase = createClient(cfg.url, cfg.serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const { data, error } = await supabase.storage.from(cfg.bucket).download(storageKey);
+  if (error) {
+    throw new Error(`Supabase download failed: ${error.message}`);
+  }
+  // data is a Blob in node runtime; convert to stream.
+  const stream: ReadableStream | undefined = (data as unknown as { stream?: () => ReadableStream })?.stream?.();
+  if (!stream) {
+    // Fallback: buffer the blob
+    const buf = Buffer.from(await (data as any).arrayBuffer());
+    return Readable.from(buf);
+  }
+  // Convert web stream to node stream
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return Readable.fromWeb(stream as any);
+}
 
 function getSupabaseDownloadUrl(storageKey: string): string | null {
   const endpoint = process.env.MINIO_ENDPOINT?.trim();
@@ -203,6 +245,13 @@ export async function putObject(
 export async function getObjectStream(key: string): Promise<Readable> {
   if (!client || !storageAvailable) {
     throw new Error("Storage not available");
+  }
+
+  // If we are configured against Supabase's S3-compatible endpoint, prefer the official
+  // Supabase Storage REST API for downloads. This avoids the recurring TLS handshake
+  // failures (EPROTO) we see with Node + AWS SDK against Supabase S3.
+  if (isSupabaseS3Endpoint(process.env.MINIO_ENDPOINT)) {
+    return getObjectStreamViaSupabaseRest(key);
   }
 
   try {
