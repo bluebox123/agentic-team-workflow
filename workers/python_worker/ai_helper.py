@@ -20,8 +20,19 @@ except ImportError:
 
 from openai import OpenAI
 
+# Try to import official Perplexity SDK client
+try:
+    from perplexity import Perplexity as PerplexitySDK
+    PERPLEXITY_SDK_AVAILABLE = True
+except ImportError:
+    PERPLEXITY_SDK_AVAILABLE = False
+
 # Load API keys from environment
 PPLX_API_KEY = os.getenv("PPLX_API_KEY")
+PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
+if PPLX_API_KEY and not PERPLEXITY_API_KEY:
+    PERPLEXITY_API_KEY = PPLX_API_KEY
+    os.environ["PERPLEXITY_API_KEY"] = PPLX_API_KEY
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
 
@@ -35,12 +46,17 @@ _last_gemini_call = 0
 _last_sambanova_call = 0
 RATE_LIMIT_DELAY = 1.0  # seconds between calls
 
-# Initialize Perplexity client (OpenAI-compatible)
+# Initialize Perplexity client
 perplexity_client = None
-if PPLX_API_KEY:
+perplexity_sdk_client = None
+if PERPLEXITY_API_KEY:
     try:
-        perplexity_client = OpenAI(api_key=PPLX_API_KEY, base_url="https://api.perplexity.ai")
-        print("[AI_HELPER] Perplexity initialized")
+        if PERPLEXITY_SDK_AVAILABLE:
+            perplexity_sdk_client = PerplexitySDK()
+            print("[AI_HELPER] Perplexity initialized (SDK)")
+        else:
+            perplexity_client = OpenAI(api_key=PERPLEXITY_API_KEY, base_url="https://api.perplexity.ai")
+            print("[AI_HELPER] Perplexity initialized (OpenAI-compatible)")
     except Exception as e:
         print(f"[AI_HELPER] Perplexity init failed: {e}")
 else:
@@ -60,10 +76,17 @@ if SAMBANOVA_API_KEY:
 print(
     "[AI_HELPER] Provider config: "
     f"AI_PROVIDER={AI_PROVIDER}, "
-    f"perplexity={'on' if bool(PPLX_API_KEY) else 'off'}, "
+    f"perplexity={'on' if bool(PERPLEXITY_API_KEY) else 'off'}, "
     f"gemini={'on' if (GEMINI_AVAILABLE and bool(GEMINI_API_KEY)) else 'off'}, "
     f"sambanova={'on' if bool(SAMBANOVA_API_KEY) else 'off'}"
 )
+
+if AI_PROVIDER == "perplexity":
+    print(
+        "[AI_HELPER] Perplexity key status: "
+        f"PERPLEXITY_API_KEY={'set' if bool(os.getenv('PERPLEXITY_API_KEY')) else 'missing'}, "
+        f"PPLX_API_KEY={'set' if bool(os.getenv('PPLX_API_KEY')) else 'missing'}"
+    )
 
 
 class AIException(Exception):
@@ -96,14 +119,21 @@ def _wait_for_rate_limit(provider: str):
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(RateLimitException))
 def generate_with_perplexity(prompt: str, preset: str = "pro-search", max_tokens: int = 2000) -> str:
-    if not perplexity_client:
+    if not perplexity_sdk_client and not perplexity_client:
         raise AIException("Perplexity client not configured")
     
     _wait_for_rate_limit("perplexity")
     
     try:
+        if perplexity_sdk_client:
+            response = perplexity_sdk_client.responses.create(preset=preset, input=prompt)
+            content = (getattr(response, "output_text", None) or "").strip()
+            if not content:
+                raise AIException("Empty response from Perplexity")
+            return content
+        
         response = perplexity_client.chat.completions.create(
-            model=preset,
+            model="sonar-pro",
             messages=[{"role": "user", "content": prompt}],
         )
         content = (response.choices[0].message.content or "").strip()
