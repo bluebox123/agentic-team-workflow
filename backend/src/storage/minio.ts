@@ -3,6 +3,8 @@ import { Upload } from "@aws-sdk/lib-storage";
 import { Readable } from "stream";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
 import https from "https";
+import { request as httpsRequest } from "https";
+import { URL } from "url";
 
 // Custom HTTPS agent for Supabase S3 compatibility
 const httpsAgent = new https.Agent({
@@ -10,6 +12,65 @@ const httpsAgent = new https.Agent({
   secureProtocol: "TLSv1_2_method",
   ciphers: "DEFAULT@SECLEVEL=1",
 });
+
+function getSupabaseDownloadUrl(storageKey: string): string | null {
+  const endpoint = process.env.MINIO_ENDPOINT?.trim();
+  if (!endpoint) return null;
+
+  // If MINIO_ENDPOINT is already a full URL, keep it. Otherwise build it.
+  let base = endpoint;
+  if (!base.startsWith("http")) {
+    if (base.includes(".storage.supabase.co")) {
+      base = `https://${base}/storage/v1/s3`;
+    } else {
+      const protocol = process.env.MINIO_USE_SSL !== "false" ? "https" : "http";
+      base = `${protocol}://${base}`;
+    }
+  }
+
+  // Supabase S3 endpoint expects path-style access for get object.
+  // URL-encode each segment of the key but preserve slashes.
+  const encodedKey = storageKey
+    .split("/")
+    .map(s => encodeURIComponent(s))
+    .join("/");
+
+  const bucket = process.env.MINIO_BUCKET || "artifacts";
+  return `${base}/${bucket}/${encodedKey}`;
+}
+
+async function getObjectStreamViaHttps(storageKey: string): Promise<Readable> {
+  const url = getSupabaseDownloadUrl(storageKey);
+  if (!url) {
+    throw new Error("S3 endpoint not configured for HTTPS fallback");
+  }
+
+  return new Promise((resolve, reject) => {
+    const req = httpsRequest(
+      new URL(url),
+      {
+        method: "GET",
+        agent: httpsAgent,
+        headers: {
+          // Required for Supabase S3: it uses AWS Signature V4
+          // so we still need AWS SDK normally. This fallback is mainly for cases
+          // where Supabase is configured with public bucket/policies.
+        },
+      },
+      res => {
+        if (!res.statusCode || res.statusCode >= 400) {
+          reject(new Error(`HTTPS fallback failed: ${res.statusCode} ${res.statusMessage || ""}`.trim()));
+          res.resume();
+          return;
+        }
+        resolve(res);
+      }
+    );
+
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 // Parse endpoint for S3-compatible services (Supabase, MinIO, etc.)
 function createS3Client(): S3Client | null {
@@ -156,7 +217,21 @@ export async function getObjectStream(key: string): Promise<Readable> {
 
     return response.Body as Readable;
   } catch (err: any) {
-    console.error(`Failed to get object ${key}:`, err.message);
+    const msg = String(err?.message || err);
+    console.error(`Failed to get object ${key}:`, msg);
+
+    // Supabase S3 endpoint sometimes fails TLS negotiation with the AWS SDK runtime.
+    // Try HTTPS fallback for public buckets (or if policies allow unauthenticated reads).
+    const shouldFallback = /EPROTO|handshake|ssl3_read_bytes|tls alert|SSL/i.test(msg);
+    if (shouldFallback) {
+      try {
+        console.warn(`[S3] Retrying download via HTTPS fallback for key: ${key}`);
+        return await getObjectStreamViaHttps(key);
+      } catch (fallbackErr: any) {
+        console.error(`[S3] HTTPS fallback also failed for key ${key}:`, String(fallbackErr?.message || fallbackErr));
+      }
+    }
+
     throw err;
   }
 }
