@@ -7,7 +7,8 @@ import sys
 import requests
 from dotenv import load_dotenv
 from prometheus_client import Counter, start_http_server
-from minio import Minio
+import boto3
+from botocore.exceptions import ClientError
 import io
 from weasyprint import HTML
 import matplotlib.pyplot as plt
@@ -34,18 +35,25 @@ ORCHESTRATOR_URL = os.getenv(
     "http://host.docker.internal:4000"
 )
 
-# MinIO Configuration
+# S3 Storage Configuration (Supabase, MinIO, etc.)
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "artifacts")
 MINIO_USE_SSL = os.getenv("MINIO_USE_SSL", "true").lower() == "true"
+MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")
 
-minio_client = Minio(
-    MINIO_ENDPOINT,
-    access_key=MINIO_ACCESS_KEY,
-    secret_key=MINIO_SECRET_KEY,
-    secure=MINIO_USE_SSL
+# Build endpoint URL
+protocol = "https" if MINIO_USE_SSL else "http"
+endpoint_url = MINIO_ENDPOINT if MINIO_ENDPOINT.startswith("http") else f"{protocol}://{MINIO_ENDPOINT}"
+
+# Initialize S3 client (compatible with Supabase Storage and MinIO)
+s3_client = boto3.client(
+    "s3",
+    endpoint_url=endpoint_url,
+    aws_access_key_id=MINIO_ACCESS_KEY,
+    aws_secret_access_key=MINIO_SECRET_KEY,
+    region_name=MINIO_REGION
 )
 
 TASK_QUEUE = "executor.tasks"
@@ -229,10 +237,10 @@ def fetch_job_artifacts_from_db(job_id):
         return []
 
 def load_image_base64(storage_key):
-    """Load image from MinIO and return base64 encoded string"""
+    """Load image from S3 and return base64 encoded string"""
     try:
-        obj = minio_client.get_object(MINIO_BUCKET, storage_key)
-        data = obj.read()
+        response = s3_client.get_object(Bucket=MINIO_BUCKET, Key=storage_key)
+        data = response["Body"].read()
         import base64
         return base64.b64encode(data).decode("utf-8")
     except Exception as e:
@@ -459,14 +467,13 @@ def run_designer(task_id, job_id, payload):
         pdf_bytes = HTML(string=html).write_pdf()
         log_task(task_id, "INFO", f"Designer generated PDF ({len(pdf_bytes)} bytes)")
         
-        # Upload to MinIO
+        # Upload to S3
         object_key = f"jobs/{job_id}/{task_id}.pdf"
-        minio_client.put_object(
-            MINIO_BUCKET,
-            object_key,
-            data=io.BytesIO(pdf_bytes),
-            length=len(pdf_bytes),
-            content_type="application/pdf"
+        s3_client.put_object(
+            Bucket=MINIO_BUCKET,
+            Key=object_key,
+            Body=io.BytesIO(pdf_bytes),
+            ContentType="application/pdf"
         )
         
         log_task(task_id, "INFO", f"PDF uploaded to {object_key}")
@@ -682,12 +689,11 @@ def run_chart(task_id, job_id, payload):
     filename = f"{role}.png"
     object_key = f"jobs/{job_id}/{task_id}.png"
 
-    minio_client.put_object(
-        MINIO_BUCKET,
-        object_key,
-        data=buf,
-        length=buf.getbuffer().nbytes,
-        content_type="image/png"
+    s3_client.put_object(
+        Bucket=MINIO_BUCKET,
+        Key=object_key,
+        Body=buf,
+        ContentType="image/png"
     )
 
     # Phase 8.4.2: Include role in artifact metadata
@@ -784,11 +790,11 @@ Provide 2-3 key insights about this data in plain language."""
         content = json.dumps({"analysis": "completed", "type": analysis_type}).encode("utf-8")
     
     object_key = f"jobs/{job_id}/{task_id}_analysis.json"
-    minio_client.put_object(
-        MINIO_BUCKET, object_key,
-        data=io.BytesIO(content),
-        length=len(content),
-        content_type="application/json"
+    s3_client.put_object(
+        Bucket=MINIO_BUCKET,
+        Key=object_key,
+        Body=io.BytesIO(content),
+        ContentType="application/json"
     )
     
     requests.post(
@@ -849,11 +855,11 @@ def run_summarizer(task_id, job_id, payload):
     content = json.dumps({"summary": summary, "original_length": original_length}).encode("utf-8")
     object_key = f"jobs/{job_id}/{task_id}_summary.json"
     
-    minio_client.put_object(
-        MINIO_BUCKET, object_key,
-        data=io.BytesIO(content),
-        length=len(content),
-        content_type="application/json"
+    s3_client.put_object(
+        Bucket=MINIO_BUCKET,
+        Key=object_key,
+        Body=io.BytesIO(content),
+        ContentType="application/json"
     )
     
     requests.post(
@@ -932,11 +938,11 @@ Keep it brief (2-3 sentences)."""
     content = json.dumps(result, indent=2).encode("utf-8")
     
     object_key = f"jobs/{job_id}/{task_id}_validation.json"
-    minio_client.put_object(
-        MINIO_BUCKET, object_key,
-        data=io.BytesIO(content),
-        length=len(content),
-        content_type="application/json"
+    s3_client.put_object(
+        Bucket=MINIO_BUCKET,
+        Key=object_key,
+        Body=io.BytesIO(content),
+        ContentType="application/json"
     )
     
     requests.post(
@@ -1004,11 +1010,11 @@ Provide the transformed data as a JSON array."""
     content = json.dumps({"transformed": transformed, "original_count": len(data) if isinstance(data, list) else 0}).encode("utf-8")
     object_key = f"jobs/{job_id}/{task_id}_transform.json"
     
-    minio_client.put_object(
-        MINIO_BUCKET, object_key,
-        data=io.BytesIO(content),
-        length=len(content),
-        content_type="application/json"
+    s3_client.put_object(
+        Bucket=MINIO_BUCKET,
+        Key=object_key,
+        Body=io.BytesIO(content),
+        ContentType="application/json"
     )
     
     requests.post(
@@ -1041,11 +1047,11 @@ def run_notifier(task_id, job_id, payload):
     }).encode("utf-8")
     
     object_key = f"jobs/{job_id}/{task_id}_notification.json"
-    minio_client.put_object(
-        MINIO_BUCKET, object_key,
-        data=io.BytesIO(content),
-        length=len(content),
-        content_type="application/json"
+    s3_client.put_object(
+        Bucket=MINIO_BUCKET,
+        Key=object_key,
+        Body=io.BytesIO(content),
+        ContentType="application/json"
     )
     
     requests.post(
@@ -1145,11 +1151,11 @@ Provide a 2-3 sentence summary of what this webpage contains."""
     content = json.dumps(scraped_data, indent=2).encode("utf-8")
     object_key = f"jobs/{job_id}/{task_id}_scrape.json"
     
-    minio_client.put_object(
-        MINIO_BUCKET, object_key,
-        data=io.BytesIO(content),
-        length=len(content),
-        content_type="application/json"
+    s3_client.put_object(
+        Bucket=MINIO_BUCKET,
+        Key=object_key,
+        Body=io.BytesIO(content),
+        ContentType="application/json"
     )
     
     requests.post(
@@ -1296,14 +1302,13 @@ Provide a detailed response completing this task. Be thorough and specific."""
 
             object_key = f"jobs/{job_id}/{task_id}.txt"
             
-            # Upload to MinIO
+            # Upload to S3
             try:
-                minio_client.put_object(
-                    MINIO_BUCKET,
-                    object_key,
-                    data=io.BytesIO(content),
-                    length=len(content),
-                    content_type="text/plain"
+                s3_client.put_object(
+                    Bucket=MINIO_BUCKET,
+                    Key=object_key,
+                    Body=io.BytesIO(content),
+                    ContentType="text/plain"
                 )
                 log_task(task_id, "INFO", f"Artifact uploaded to {object_key}")
                 

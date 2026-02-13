@@ -3,7 +3,7 @@ psycopg2-binary
 requests
 python-dotenv
 prometheus_client
-Minio
+boto3
 weasyprint
 matplotlib
 google-generativeai
