@@ -37,6 +37,7 @@ function createS3Client(): S3Client | null {
       secretAccessKey: secretKey,
     },
     forcePathStyle: false, // Supabase uses virtual-hosted-style
+    tls: true,
   });
 }
 
