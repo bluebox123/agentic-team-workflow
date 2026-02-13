@@ -89,6 +89,23 @@ export async function fetchFrozenArtifacts(jobId: string): Promise<{
   return res.data;
 }
 
+// Fetch artifact as plain text (used for text, JSON, etc.)
+export async function fetchArtifactText(artifactId: string): Promise<string> {
+  const res = await api.get(`/artifacts/${artifactId}/download`, {
+    responseType: "text",
+    transformResponse: (r) => r,
+  });
+  return res.data as unknown as string;
+}
+
+// Fetch artifact as a Blob (used for images, PDFs, binary files)
+export async function fetchArtifactBlob(artifactId: string): Promise<Blob> {
+  const res = await api.get(`/artifacts/${artifactId}/download`, {
+    responseType: "blob",
+  });
+  return res.data as Blob;
+}
+
 export function getArtifactDownloadUrl(artifactId: string): string {
   return `${API_BASE_URL}/artifacts/${artifactId}/download`;
 }
