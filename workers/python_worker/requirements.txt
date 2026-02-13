@@ -11,3 +11,4 @@ openai
 beautifulsoup4
 lxml
 tenacity
+perplexity
