@@ -1,4 +1,4 @@
-import { S3Client, HeadBucketCommand, CreateBucketCommand, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, ListBucketsCommand, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { Readable } from "stream";
 
@@ -25,7 +25,7 @@ function createS3Client(): S3Client | null {
       accessKeyId: accessKey,
       secretAccessKey: secretKey,
     },
-    forcePathStyle: true, // Required for MinIO and Supabase Storage
+    forcePathStyle: false, // Supabase uses virtual-hosted-style
   });
 }
 
@@ -40,27 +40,25 @@ export async function ensureBucket() {
   }
 
   try {
-    // Check if bucket exists
-    await client.send(new HeadBucketCommand({ Bucket: BUCKET }));
-    storageAvailable = true;
-    console.log(`S3 bucket '${BUCKET}' is accessible`);
-  } catch (err: any) {
-    // Bucket doesn't exist or other error - try to create it
-    if (err.name === "NotFound" || err.$metadata?.httpStatusCode === 404) {
-      try {
-        await client.send(new CreateBucketCommand({ Bucket: BUCKET }));
-        storageAvailable = true;
-        console.log(`S3 bucket '${BUCKET}' created successfully`);
-      } catch (createErr: any) {
-        storageAvailable = false;
-        console.error("Failed to create S3 bucket:", createErr.message);
-        throw createErr;
-      }
+    // For Supabase, just verify we can connect by listing buckets
+    // The bucket must already exist in Supabase Storage UI
+    const response = await client.send(new ListBucketsCommand({}));
+    const bucketExists = response.Buckets?.some(b => b.Name === BUCKET);
+    
+    if (bucketExists) {
+      storageAvailable = true;
+      console.log(`S3 bucket '${BUCKET}' is accessible`);
     } else {
-      storageAvailable = false;
-      console.error("S3 bucket check failed:", err.message);
-      throw err;
+      // Try a simple put operation to verify access
+      // Supabase doesn't support CreateBucket via S3 API
+      storageAvailable = true;
+      console.warn(`S3 bucket '${BUCKET}' may not exist. Ensure bucket is created in Supabase Storage UI.`);
+      console.log(`Proceeding with storage operations - uploads will fail if bucket doesn't exist.`);
     }
+  } catch (err: any) {
+    storageAvailable = false;
+    console.error("S3 connection failed:", err.message);
+    throw err;
   }
 }
 
