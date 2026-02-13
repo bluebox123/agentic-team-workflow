@@ -39,12 +39,13 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "artifacts")
+MINIO_USE_SSL = os.getenv("MINIO_USE_SSL", "true").lower() == "true"
 
 minio_client = Minio(
     MINIO_ENDPOINT,
     access_key=MINIO_ACCESS_KEY,
     secret_key=MINIO_SECRET_KEY,
-    secure=False
+    secure=MINIO_USE_SSL
 )
 
 TASK_QUEUE = "executor.tasks"

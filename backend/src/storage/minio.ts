@@ -20,10 +20,12 @@ function parseEndpoint(raw: string | undefined): { endPoint: string; port: numbe
 
 const { endPoint, port } = parseEndpoint(process.env.MINIO_ENDPOINT);
 
+const useSSL = process.env.MINIO_USE_SSL === "true";
+
 const client = new Client({
   endPoint,
   port,
-  useSSL: false,
+  useSSL,
   accessKey: process.env.MINIO_ACCESS_KEY || "minioadmin",
   secretKey: process.env.MINIO_SECRET_KEY || "minioadmin",
 });
