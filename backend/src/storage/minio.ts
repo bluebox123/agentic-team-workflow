@@ -1,6 +1,14 @@
 import { S3Client, ListBucketsCommand, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { Readable } from "stream";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
+import https from "https";
+
+// Custom HTTPS agent with TLS configuration for Supabase compatibility
+const httpsAgent = new https.Agent({
+  secureProtocol: "TLSv1_2_method",
+  rejectUnauthorized: true,
+});
 
 // Parse endpoint for S3-compatible services (Supabase, MinIO, etc.)
 function createS3Client(): S3Client | null {
@@ -37,7 +45,9 @@ function createS3Client(): S3Client | null {
       secretAccessKey: secretKey,
     },
     forcePathStyle: false, // Supabase uses virtual-hosted-style
-    tls: true,
+    requestHandler: new NodeHttpHandler({
+      httpsAgent,
+    }),
   });
 }
 
