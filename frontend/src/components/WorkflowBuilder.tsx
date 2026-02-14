@@ -796,20 +796,20 @@ function FlowCanvas({
                         style={{ opacity: 0.4 }}
                     />
                     <Controls 
-                        className="!bg-slate-900/80 !border-slate-700 !shadow-xl"
+                        className="!bg-background !border !shadow-md"
                     />
                     
                     {/* Stats Panel */}
                     <Panel position="top-left" className="m-4">
-                        <div className="bg-slate-900/90 backdrop-blur-sm border border-slate-700 rounded-lg p-3 shadow-xl">
+                        <div className="bg-card border rounded-lg p-3 shadow-md">
                             <div className="flex items-center gap-4 text-xs">
                                 <div className="flex items-center gap-1.5">
-                                    <div className="w-2 h-2 rounded-full bg-indigo-500" />
-                                    <span className="text-slate-300">{nodes.length} Nodes</span>
+                                    <div className="w-2 h-2 rounded-full bg-primary" />
+                                    <span className="text-muted-foreground">{nodes.length} Nodes</span>
                                 </div>
                                 <div className="flex items-center gap-1.5">
-                                    <div className="w-2 h-2 rounded-full bg-purple-500" />
-                                    <span className="text-slate-300">{edges.length} Connections</span>
+                                    <div className="w-2 h-2 rounded-full bg-primary/60" />
+                                    <span className="text-muted-foreground">{edges.length} Connections</span>
                                 </div>
                             </div>
                         </div>
@@ -818,15 +818,15 @@ function FlowCanvas({
                     {/* Instructions */}
                     {nodes.length === 0 && (
                         <Panel position="top-center" className="mt-8">
-                            <div className="text-center p-8 bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-xl shadow-2xl">
-                                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                                    <Sparkles className="w-8 h-8 text-white" />
+                            <div className="text-center p-8 bg-card border rounded-xl shadow-lg">
+                                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center">
+                                    <Sparkles className="w-8 h-8 text-primary" />
                                 </div>
-                                <h3 className="text-lg font-semibold text-white mb-2">Build Your Workflow</h3>
-                                <p className="text-sm text-slate-400 max-w-xs">
+                                <h3 className="text-lg font-semibold mb-2">Build Your Workflow</h3>
+                                <p className="text-sm text-muted-foreground max-w-xs">
                                     Drag agent types from the left sidebar and drop them here to create your workflow.
                                 </p>
-                                <div className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-500">
+                                <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
                                     <MousePointer2 className="w-4 h-4" />
                                     <span>Connect nodes by dragging from one handle to another</span>
                                 </div>
@@ -878,22 +878,22 @@ export function WorkflowBuilder({
     };
 
     return (
-        <div className="flex flex-col h-[600px] rounded-xl overflow-hidden border border-slate-700 bg-slate-950 shadow-2xl">
+        <div className="flex flex-col h-full overflow-hidden bg-background border rounded-lg">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-700">
+            <div className="flex items-center justify-between px-4 py-3 bg-muted border-b">
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2">
-                        <Layout className="w-5 h-5 text-indigo-500" />
-                        <h2 className="font-semibold text-white">Workflow Builder</h2>
+                        <Layout className="w-5 h-5 text-primary" />
+                        <h2 className="font-semibold">Workflow Builder</h2>
                     </div>
-                    <div className="flex items-center gap-1 ml-4 bg-slate-800 rounded-lg p-1">
+                    <div className="flex items-center gap-1 ml-4 bg-background rounded-lg p-1 border">
                         <button
                             onClick={() => setActiveMode('build')}
                             className={cn(
                                 "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
                                 activeMode === 'build' 
-                                    ? "bg-indigo-600 text-white" 
-                                    : "text-slate-400 hover:text-white hover:bg-slate-700"
+                                    ? "bg-primary text-primary-foreground" 
+                                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
                             )}
                         >
                             Build
@@ -903,8 +903,8 @@ export function WorkflowBuilder({
                             className={cn(
                                 "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
                                 activeMode === 'view' 
-                                    ? "bg-indigo-600 text-white" 
-                                    : "text-slate-400 hover:text-white hover:bg-slate-700"
+                                    ? "bg-primary text-primary-foreground" 
+                                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
                             )}
                         >
                             View
@@ -952,7 +952,6 @@ export function WorkflowBuilder({
                     <NodePropertiesPanel
                         node={selectedNode}
                         onChange={(id, data) => {
-                            // Find the react flow instance and update the node
                             const event = new CustomEvent('nodeDataChange', { 
                                 detail: { id, data } 
                             });

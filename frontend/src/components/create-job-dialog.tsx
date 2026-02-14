@@ -323,12 +323,15 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                 )}
                             </TabsContent>
 
-                            <TabsContent value="visual" className="flex-1 overflow-hidden m-0 p-0">
-                                <WorkflowBuilder
-                                    workflow={visualWorkflow || undefined}
-                                    onWorkflowChange={handleVisualWorkflowChange}
-                                    mode="build"
-                                />
+                            <TabsContent value="visual" className="flex-1 m-0 p-0 relative" style={{ minHeight: '400px' }}>
+                                <div className="absolute inset-0">
+                                    <WorkflowBuilder
+                                        key="visual-builder"
+                                        workflow={visualWorkflow || undefined}
+                                        onWorkflowChange={handleVisualWorkflowChange}
+                                        mode="build"
+                                    />
+                                </div>
                             </TabsContent>
                         </Tabs>
                     </div>
