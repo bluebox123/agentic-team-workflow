@@ -99,68 +99,121 @@ db_conn = connect_db()
 
 
 def get_retry_count(task_id):
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "SELECT retry_count FROM tasks WHERE id = %s",
-            (task_id,),
-        )
-        row = cur.fetchone()
-        return row[0] if row else 0
+    global db_conn
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT retry_count FROM tasks WHERE id = %s",
+                (task_id,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else 0
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        print(f"[WORKER] DB connection lost in get_retry_count, reconnecting: {e}")
+        db_conn = connect_db()
+        # Retry once after reconnect
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT retry_count FROM tasks WHERE id = %s",
+                (task_id,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else 0
 
 
 def increment_retry(task_id):
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE tasks SET retry_count = retry_count + 1 WHERE id = %s",
-            (task_id,),
-        )
+    global db_conn
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE tasks SET retry_count = retry_count + 1 WHERE id = %s",
+                (task_id,),
+            )
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        print(f"[WORKER] DB connection lost in increment_retry, reconnecting: {e}")
+        db_conn = connect_db()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE tasks SET retry_count = retry_count + 1 WHERE id = %s",
+                (task_id,),
+            )
 
 
 def log_task(task_id, level, message):
-    with db_conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO task_logs (task_id, level, message)
-            VALUES (%s, %s, %s)
-            """,
-            (task_id, level, message),
-        )
+    global db_conn
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO task_logs (task_id, level, message)
+                VALUES (%s, %s, %s)
+                """,
+                (task_id, level, message),
+            )
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        print(f"[WORKER] DB connection lost in log_task, reconnecting: {e}")
+        db_conn = connect_db()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO task_logs (task_id, level, message)
+                VALUES (%s, %s, %s)
+                """,
+                (task_id, level, message),
+            )
 
 
 def load_task_context(task_id):
-    with db_conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT agent_type, payload, job_id, name
-            FROM tasks
-            WHERE id = %s
-            """,
-            (task_id,),
-        )
-        row = cur.fetchone()
-
-    if not row:
-        # Log detailed debug information
-        print(f"[WORKER] Task {task_id} not found in DB. Checking if task exists at all...")
+    global db_conn
+    try:
         with db_conn.cursor() as cur:
-            cur.execute("SELECT id, name, status FROM tasks WHERE id = %s", (task_id,))
-            debug_row = cur.fetchone()
-            if debug_row:
-                print(f"[WORKER] Task exists but has NULL agent_type/payload: id={debug_row[0]}, name={debug_row[1]}, status={debug_row[2]}")
-            else:
-                print(f"[WORKER] Task completely not found in database")
-        return None, {}, None, None
+            cur.execute(
+                """
+                SELECT agent_type, payload, job_id, name
+                FROM tasks
+                WHERE id = %s
+                """,
+                (task_id,),
+            )
+            row = cur.fetchone()
 
-    agent_type, task_payload, job_id, name = row
-    if task_payload is None:
-        task_payload = {}
-    elif isinstance(task_payload, str):
-        try:
-            task_payload = json.loads(task_payload)
-        except Exception:
-            task_payload = {}
+        if not row:
+            # Log detailed debug information
+            print(f"[WORKER] Task {task_id} not found in DB. Checking if task exists at all...")
+            try:
+                with db_conn.cursor() as cur:
+                    cur.execute("SELECT id, name, status FROM tasks WHERE id = %s", (task_id,))
+                    debug_row = cur.fetchone()
+                    if debug_row:
+                        print(f"[WORKER] Task exists but has NULL agent_type/payload: id={debug_row[0]}, name={debug_row[1]}, status={debug_row[2]}")
+                    else:
+                        print(f"[WORKER] Task {task_id} does not exist in DB at all")
+            except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                print(f"[WORKER] DB connection lost during debug check: {e}")
+                db_conn = connect_db()
+            return None, None, None, None
 
-    return agent_type, task_payload, job_id, name
+        agent_type, task_payload, job_id, name = row
+        return agent_type, task_payload, job_id, name
+
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        print(f"[WORKER] DB connection lost in load_task_context, reconnecting: {e}")
+        db_conn = connect_db()
+        # Retry once after reconnect
+        with db_conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT agent_type, payload, job_id, name
+                FROM tasks
+                WHERE id = %s
+                """,
+                (task_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None, None, None, None
+        agent_type, task_payload, job_id, name = row
+        return agent_type, task_payload, job_id, name
 
 
 # -------------------------

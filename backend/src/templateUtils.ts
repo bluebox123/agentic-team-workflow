@@ -77,6 +77,10 @@ export async function resolveTaskInputs(
             if (!context.tasks["analyzer"]) {
                 context.tasks["analyzer"] = { outputs: rawResult };
             }
+            // Also alias analyze_chart since templates reference this name
+            if (!context.tasks["analyze_chart"]) {
+                context.tasks["analyze_chart"] = { outputs: rawResult };
+            }
         }
 
         if (parentTaskId && row.id === parentTaskId) {
