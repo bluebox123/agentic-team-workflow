@@ -751,8 +751,12 @@ def run_analyzer(task_id, job_id, payload):
     data = payload.get("data", [])
     analysis_type = payload.get("analysis_type", "summary")
     
+    # Initialize result dict for all code paths
+    result = {}
+    
     if not data:
         content = json.dumps({"error": "No data provided for analysis"}).encode("utf-8")
+        result = {"error": "No data provided"}
     elif analysis_type == "summary":
         result = {
             "count": len(data),
@@ -795,9 +799,39 @@ Provide 2-3 key insights about this data in plain language."""
         increasing = all(data[i] <= data[i+1] for i in range(len(data)-1))
         decreasing = all(data[i] >= data[i+1] for i in range(len(data)-1))
         trend = "increasing" if increasing else "decreasing" if decreasing else "mixed"
-        content = json.dumps({"trend": trend, "data_points": len(data)}).encode("utf-8")
+        
+        result = {
+            "trend": trend,
+            "data_points": len(data),
+            "count": len(data)
+        }
+        
+        # Add AI-powered insights for trend
+        try:
+            ai_prompt = f"""Analyze this trend data and provide insights:
+
+Data Points: {data[:50]}
+Trend Direction: {trend}
+Number of Data Points: {len(data)}
+
+Provide 2-3 key insights about this trend in plain language."""
+            
+            ai_insights = ai_helper.generate_ai_response(
+                ai_prompt,
+                task_type="analyzer",
+                temperature=0.5,
+                max_tokens=200
+            )
+            result["ai_insights"] = ai_insights
+            log_task(task_id, "INFO", "AI trend insights generated")
+        except Exception as e:
+            log_task(task_id, "WARN", f"AI insights failed: {e}")
+            result["ai_insights"] = "AI analysis unavailable"
+        
+        content = json.dumps(result, indent=2).encode("utf-8")
     else:
-        content = json.dumps({"analysis": "completed", "type": analysis_type}).encode("utf-8")
+        result = {"analysis": "completed", "type": analysis_type, "count": len(data) if data else 0}
+        content = json.dumps(result, indent=2).encode("utf-8")
     
     object_key = f"jobs/{job_id}/{task_id}_analysis.json"
     s3_client.put_object(
@@ -819,6 +853,7 @@ Provide 2-3 key insights about this data in plain language."""
                 "median": result.get("median"),
                 "min": result.get("min"),
                 "max": result.get("max"),
+                "trend": result.get("trend"),
                 "insights": result.get("ai_insights", "Analysis completed")
             },
             "artifact": {"type": "json", "filename": "analysis.json", "storage_key": object_key}
