@@ -371,7 +371,11 @@ function NodePropertiesPanel({
     const handleInputChange = useCallback((key: string, value: unknown) => {
         if (!node) return;
         const newInputs = { ...inputs, [key]: value };
-        onChange(node.id, { ...node.data, inputs: newInputs });
+        const newData = { ...node.data, inputs: newInputs };
+        onChange(node.id, newData);
+        // Also dispatch event to update FlowCanvas nodes
+        const event = new CustomEvent('nodeDataChange', { detail: { id: node.id, data: newData } });
+        window.dispatchEvent(event);
     }, [node, inputs, onChange]);
 
     const handleRemoveInput = useCallback((key: string) => {
@@ -547,7 +551,7 @@ function FlowCanvas({
     const { project, fitView } = useReactFlow();
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
-    // Convert initial workflow to nodes/edges
+    // Convert initial workflow to nodes/edges (without handlers first)
     const getInitialNodes = useCallback((): Node<AgentNodeData>[] => {
         if (!initialWorkflow?.nodes) return [];
         
@@ -590,6 +594,70 @@ function FlowCanvas({
 
     const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
     const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+    // Handler functions - defined AFTER state hooks
+    const handleDeleteNode = useCallback((id: string) => {
+        setNodes((nds) => nds.filter((n) => n.id !== id));
+        setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
+        if (selectedNodeId === id) {
+            setSelectedNodeId(null);
+        }
+    }, [setNodes, setEdges, selectedNodeId]);
+
+    const handleEditNode = useCallback((id: string) => {
+        setSelectedNodeId(id);
+    }, []);
+
+    // Update nodes with handlers - only once after mount, not in a loop
+    useEffect(() => {
+        setNodes((nds) =>
+            nds.map((n) => ({
+                ...n,
+                data: {
+                    ...n.data,
+                    onDelete: handleDeleteNode,
+                    onEdit: handleEditNode
+                }
+            }))
+        );
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []); // Only run once on mount
+
+    // When new nodes are added via onDrop, include handlers immediately
+    const onDrop = useCallback(
+        (event: React.DragEvent) => {
+            event.preventDefault();
+
+            const wrapperBounds = reactFlowWrapper.current?.getBoundingClientRect();
+            if (!wrapperBounds) return;
+
+            const typeData = event.dataTransfer.getData('application/reactflow');
+            if (!typeData) return;
+
+            const agentType: AgentType = JSON.parse(typeData);
+            const position = project({
+                x: event.clientX - wrapperBounds.left,
+                y: event.clientY - wrapperBounds.top,
+            });
+
+            const newNode: Node<AgentNodeData> = {
+                id: `${agentType.id}_${Date.now()}`,
+                type: 'agent',
+                position,
+                data: {
+                    label: agentType.name,
+                    agentType: agentType.id,
+                    inputs: {},
+                    status: 'pending',
+                    onDelete: handleDeleteNode,
+                    onEdit: handleEditNode
+                },
+            };
+
+            setNodes((nds) => nds.concat(newNode));
+        },
+        [project, setNodes, handleDeleteNode, handleEditNode]
+    );
 
     // Build workflow DAG from current nodes and edges
     const buildWorkflowDAG = useCallback((): WorkflowDAG => {
@@ -645,33 +713,6 @@ function FlowCanvas({
         };
     }, [nodes, edges]);
 
-    // Handler functions using useCallback
-    const handleDeleteNode = useCallback((id: string) => {
-        setNodes((nds) => nds.filter((n) => n.id !== id));
-        setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
-        if (selectedNodeId === id) {
-            setSelectedNodeId(null);
-        }
-    }, [setNodes, setEdges, selectedNodeId]);
-
-    const handleEditNode = useCallback((id: string) => {
-        setSelectedNodeId(id);
-    }, []);
-
-    // Update nodes with delete/edit handlers whenever nodes or handlers change
-    useEffect(() => {
-        setNodes((nds) =>
-            nds.map((n) => ({
-                ...n,
-                data: {
-                    ...n.data,
-                    onDelete: handleDeleteNode,
-                    onEdit: handleEditNode
-                }
-            }))
-        );
-    }, [handleDeleteNode, handleEditNode, setNodes]);
-
     // Update selected node for properties panel
     useEffect(() => {
         if (selectedNodeId) {
@@ -701,41 +742,6 @@ function FlowCanvas({
         event.preventDefault();
         event.dataTransfer.dropEffect = 'move';
     }, []);
-
-    const onDrop = useCallback(
-        (event: React.DragEvent) => {
-            event.preventDefault();
-
-            const wrapperBounds = reactFlowWrapper.current?.getBoundingClientRect();
-            if (!wrapperBounds) return;
-
-            const typeData = event.dataTransfer.getData('application/reactflow');
-            if (!typeData) return;
-
-            const agentType: AgentType = JSON.parse(typeData);
-            const position = project({
-                x: event.clientX - wrapperBounds.left,
-                y: event.clientY - wrapperBounds.top,
-            });
-
-            const newNode: Node<AgentNodeData> = {
-                id: `${agentType.id}_${Date.now()}`,
-                type: 'agent',
-                position,
-                data: {
-                    label: agentType.name,
-                    agentType: agentType.id,
-                    inputs: {},
-                    status: 'pending',
-                    onDelete: handleDeleteNode,
-                    onEdit: handleEditNode
-                },
-            };
-
-            setNodes((nds) => nds.concat(newNode));
-        },
-        [project, setNodes, handleDeleteNode, handleEditNode]
-    );
 
     const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
         setSelectedNodeId(node.id);
