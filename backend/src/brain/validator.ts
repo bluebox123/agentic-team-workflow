@@ -9,7 +9,6 @@ interface ValidationResult {
 export function validateWorkflow(dag: WorkflowDAG): ValidationResult {
     const errors: string[] = [];
     const nodeIds = new Set(dag.nodes.map((n) => n.id));
-    const edgeSet = new Set(dag.edges.map((e) => `${e.from}=>${e.to}`));
 
     // 1. Check for unknown nodes in edges
     dag.edges.forEach((edge) => {
@@ -58,14 +57,6 @@ export function validateWorkflow(dag: WorkflowDAG): ValidationResult {
                             if (!targetNode) {
                                 errors.push(`Node ${node.id} references unknown node '${targetNodeId}' in param '${key}'`);
                                 continue;
-                            }
-
-                            // Check 1.5: Dependency edge exists from target -> node
-                            // If a node references another node's outputs, it MUST depend on it.
-                            if (!edgeSet.has(`${targetNodeId}=>${node.id}`)) {
-                                errors.push(
-                                    `Node ${node.id} references outputs from '${targetNodeId}' in param '${key}' but is missing dependency edge ${targetNodeId} -> ${node.id}`
-                                );
                             }
 
                             // Check 2: Target agent produces this output

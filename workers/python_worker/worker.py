@@ -72,6 +72,9 @@ DLQ_QUEUE = "executor.tasks.dlq"
 MAX_RETRIES = 3
 RETRY_BACKOFF_SEC = 2
 
+# Track tasks currently being processed to prevent duplicates
+in_progress_tasks = set()
+
 # Prometheus metrics
 worker_tasks_total = Counter(
     "worker_tasks_total",
@@ -1492,13 +1495,23 @@ def handle_message(ch, method, properties, body):
     # The backend resolves {{tasks.X.outputs.Y}} templates before enqueueing
     task_payload_from_message = payload.get("payload", {})
 
+    # Check if task is already being processed (prevent duplicates)
+    if task_id in in_progress_tasks:
+        print(f"[WORKER] Task {task_id} already in progress, skipping duplicate message", flush=True)
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+        return
+
     print(f"[WORKER] Received task {task_id}", flush=True)
+    
+    # Add to in-progress set
+    in_progress_tasks.add(task_id)
 
     agent_type_db, task_payload_db, job_id_db, task_name_db = load_task_context(task_id)
     if job_id is None:
         job_id = job_id_db
     if agent_type_db is None:
         log_task(task_id, "ERROR", "Task not found in DB")
+        in_progress_tasks.discard(task_id)  # Remove from in-progress
         ch.basic_ack(delivery_tag=method.delivery_tag)
         return
     
@@ -1519,11 +1532,13 @@ def handle_message(ch, method, properties, body):
 
         # If already RUNNING (e.g., worker crash/restart), proceed idempotently
         if r.status_code not in (200, 409):
+            in_progress_tasks.discard(task_id)  # Remove from in-progress
             ch.basic_ack(delivery_tag=method.delivery_tag)
             return
 
     except Exception as e:
         log_task(task_id, "ERROR", f"Start failed: {e}")
+        in_progress_tasks.discard(task_id)  # Remove from in-progress
         ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
         return
 
@@ -1695,6 +1710,10 @@ Provide a detailed response completing this task. Be thorough and specific."""
             )
             time.sleep(RETRY_BACKOFF_SEC)
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+    
+    finally:
+        # Always remove from in-progress set when done (success or failure)
+        in_progress_tasks.discard(task_id)
 
 
 # -------------------------

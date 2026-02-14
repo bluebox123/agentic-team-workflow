@@ -219,13 +219,20 @@ export function BrainPanel() {
                 const node = analysisResult.workflow!.nodes.find(n => n.id === nodeId);
                 if (!node) return null;
 
+                // For tasks with multiple dependencies, find the LAST dependency in execution order
+                // This ensures the task waits for ALL dependencies to complete before running
                 let parentIndex: number | undefined = undefined;
                 if (node.dependencies.length > 0) {
-                    const parentId = node.dependencies[0];
-                    parentIndex = executionOrder.indexOf(parentId);
-                    if (parentIndex === -1 || parentIndex >= index) {
-                        console.warn(`Dependency ${parentId} for ${nodeId} not found or invalid order.`);
-                        parentIndex = undefined;
+                    // Find the dependency that appears LATEST in execution order
+                    // This ensures task waits for ALL dependencies
+                    const dependencyIndices = node.dependencies
+                        .map(depId => executionOrder.indexOf(depId))
+                        .filter(idx => idx !== -1 && idx < index);
+                    
+                    if (dependencyIndices.length > 0) {
+                        // Use the last dependency (highest index) as the parent
+                        // This ensures all previous dependencies complete first
+                        parentIndex = Math.max(...dependencyIndices);
                     }
                 }
 

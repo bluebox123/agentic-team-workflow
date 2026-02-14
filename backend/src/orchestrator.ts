@@ -4,6 +4,68 @@ import { resolveTaskInputs } from "./templateUtils";
 import { setTimeout } from "timers/promises";
 
 /**
+ * Extract task dependencies from template placeholders in payload
+ * Looks for {{tasks.<taskName>.outputs.<field>}} patterns
+ */
+function extractTemplateDependencies(payload: any): string[] {
+  const deps = new Set<string>();
+  const templateRegex = /\{\{tasks\.([a-zA-Z0-9_]+)\.outputs\./g;
+  
+  function scan(obj: any) {
+    if (typeof obj === 'string') {
+      let match;
+      while ((match = templateRegex.exec(obj)) !== null) {
+        deps.add(match[1]);
+      }
+    } else if (Array.isArray(obj)) {
+      obj.forEach(scan);
+    } else if (obj && typeof obj === 'object') {
+      Object.values(obj).forEach(scan);
+    }
+  }
+  
+  scan(payload);
+  return Array.from(deps);
+}
+
+/**
+ * Check if all template dependencies are satisfied (SUCCESS status)
+ */
+async function areTemplateDependenciesSatisfied(
+  jobId: string, 
+  payload: any, 
+  parentTaskId: string | null
+): Promise<{ satisfied: boolean; missing: string[] }> {
+  const templateDeps = extractTemplateDependencies(payload);
+  
+  if (templateDeps.length === 0) {
+    return { satisfied: true, missing: [] };
+  }
+  
+  // Query status of all tasks with names matching template dependencies
+  const { rows } = await pool.query(
+    `
+    SELECT name, status 
+    FROM tasks 
+    WHERE job_id = $1 AND name = ANY($2)
+    `,
+    [jobId, templateDeps]
+  );
+  
+  const statusMap = new Map(rows.map(r => [r.name, r.status]));
+  const missing: string[] = [];
+  
+  for (const dep of templateDeps) {
+    const status = statusMap.get(dep);
+    if (status !== 'SUCCESS') {
+      missing.push(dep);
+    }
+  }
+  
+  return { satisfied: missing.length === 0, missing };
+}
+
+/**
  * Phase 8.4.4: Attach artifact metadata to Designer tasks (updated for 8.4.3)
  */
 async function attachArtifactsToDesigner(jobId: string, payload: any): Promise<any> {
@@ -50,12 +112,25 @@ export async function enqueueReadyTasks(jobId: string) {
     }
 
     let payload = row.payload;
+    if (typeof payload === 'string') {
+      payload = JSON.parse(payload);
+    }
+
+    // Check if template dependencies are satisfied BEFORE resolving inputs
+    // This ensures we don't try to resolve {{tasks.X.outputs.Y}} when X hasn't completed
+    const { satisfied: depsSatisfied, missing } = await areTemplateDependenciesSatisfied(
+      jobId, 
+      payload, 
+      row.parent_task_id
+    );
+    
+    if (!depsSatisfied) {
+      console.log(`[ORCHESTRATOR] Task ${row.id} waiting for dependencies: ${missing.join(', ')}`);
+      continue; // Skip this task, will be retried when dependencies complete
+    }
 
     // Resolve dynamic inputs
     try {
-      if (typeof payload === 'string') {
-        payload = JSON.parse(payload);
-      }
       payload = await resolveTaskInputs(jobId, row.id, row.parent_task_id, payload);
     } catch (err: any) {
       console.error(`Failed to resolve inputs for task ${row.id}:`, err);
