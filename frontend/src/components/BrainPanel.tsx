@@ -1,15 +1,16 @@
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './ui/card';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
 import { WorkflowVisualizer } from './WorkflowVisualizer';
 import { analyzeRequest, type BrainAnalysisResult } from '../api/brain';
-import { createJob, fetchJobTasks, fetchJobs, type Job } from '../api/jobs';
+import { createJob, fetchJobTasks, fetchJobs, type Job, type TaskConfig } from '../api/jobs';
 import { fetchArtifacts, fetchArtifactBlob, fetchArtifactText, type Artifact } from '../api/artifacts';
 import { fetchLogs } from '../api/logs';
 import { Loader2, Play, Sparkles, Save, Trash2, Clock, CheckCircle, XCircle, AlertCircle, FileText, Activity, Download } from 'lucide-react';
+import type { WorkflowDAG } from '../api/brain';
 
 interface SavedPrompt {
     id: string;
@@ -17,10 +18,24 @@ interface SavedPrompt {
     timestamp: number;
 }
 
+interface JobTask {
+    id: string;
+    name: string;
+    status: string;
+}
+
+function toJobTask(value: unknown): JobTask | null {
+    if (!value || typeof value !== 'object') return null;
+    const v = value as { id?: unknown; name?: unknown; status?: unknown };
+    if (typeof v.id !== 'string' || typeof v.name !== 'string' || typeof v.status !== 'string') return null;
+    return { id: v.id, name: v.name, status: v.status };
+}
+
 export function BrainPanel() {
     const [prompt, setPrompt] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [analysisResult, setAnalysisResult] = useState<BrainAnalysisResult | null>(null);
+    const [plannedWorkflow, setPlannedWorkflow] = useState<WorkflowDAG | null>(null);
     const [isExecuting, setIsExecuting] = useState(false);
     const [executionStatus, setExecutionStatus] = useState<string | null>(null);
 
@@ -31,8 +46,16 @@ export function BrainPanel() {
     const [executingJob, setExecutingJob] = useState<Job | null>(null);
     const [jobLogs, setJobLogs] = useState<Array<{ level: string; message: string; created_at: string }>>([]);
     const [jobArtifacts, setJobArtifacts] = useState<Artifact[]>([]);
-    const [jobTasks, setJobTasks] = useState<any[]>([]);
-    const [autoRefreshInterval, setAutoRefreshInterval] = useState<number | null>(null);
+    const [jobTasks, setJobTasks] = useState<JobTask[]>([]);
+    const [autoRefreshInterval, setAutoRefreshInterval] = useState<ReturnType<typeof setInterval> | null>(null);
+
+    const taskStatusByName = useMemo(() => {
+        const map: Record<string, string> = {};
+        for (const t of jobTasks) {
+            map[t.name] = t.status;
+        }
+        return map;
+    }, [jobTasks]);
 
     // Artifact Viewing
     const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
@@ -156,19 +179,25 @@ export function BrainPanel() {
                     setExecutingJob(job);
 
                     // Fetch tasks, logs, and artifacts
-                    const [tasks, artifacts] = await Promise.all([
+                    const [tasksRaw, artifacts] = await Promise.all([
                         fetchJobTasks(jobId),
                         fetchArtifacts(jobId)
                     ]);
 
-                    setJobTasks(tasks);
+                    const normalizedTasks = Array.isArray(tasksRaw)
+                        ? (tasksRaw.map(toJobTask).filter((t): t is JobTask => t !== null))
+                        : [];
+
+                    setJobTasks(normalizedTasks);
                     setJobArtifacts(artifacts);
 
                     // Get logs from the latest task
-                    if (tasks.length > 0) {
-                        const latestTask = tasks[tasks.length - 1];
-                        const logs = await fetchLogs(latestTask.id);
+                    if (Array.isArray(tasksRaw) && tasksRaw.length > 0) {
+                        const latestTask = tasksRaw[tasksRaw.length - 1] as { id?: unknown };
+                        if (latestTask?.id && typeof latestTask.id === 'string') {
+                            const logs = await fetchLogs(latestTask.id);
                         setJobLogs(logs);
+                        }
                     }
 
                     // Stop tracking if job is complete
@@ -189,7 +218,7 @@ export function BrainPanel() {
 
         // Set up auto-refresh
         const interval = setInterval(refreshJobStatus, 3000);
-        setAutoRefreshInterval(interval as any);
+        setAutoRefreshInterval(interval);
     }, [autoRefreshInterval]);
 
     const handleAnalyze = async () => {
@@ -200,6 +229,7 @@ export function BrainPanel() {
         try {
             const result = await analyzeRequest(prompt);
             setAnalysisResult(result);
+            if (result.workflow) setPlannedWorkflow(result.workflow);
         } catch (error) {
             console.error(error);
             setExecutionStatus("Analysis failed. See console.");
@@ -215,9 +245,11 @@ export function BrainPanel() {
         try {
             const executionOrder = analysisResult.workflow.executionOrder || analysisResult.workflow.nodes.map(n => n.id);
 
-            const tasks = executionOrder.map((nodeId, index) => {
-                const node = analysisResult.workflow!.nodes.find(n => n.id === nodeId);
-                if (!node) return null;
+            const tasks: TaskConfig[] = [];
+            for (let index = 0; index < executionOrder.length; index++) {
+                const nodeId = executionOrder[index];
+                const node = analysisResult.workflow.nodes.find(n => n.id === nodeId);
+                if (!node) continue;
 
                 // For tasks with multiple dependencies, find the LAST dependency in execution order
                 // This ensures the task waits for ALL dependencies to complete before running
@@ -228,7 +260,7 @@ export function BrainPanel() {
                     const dependencyIndices = node.dependencies
                         .map(depId => executionOrder.indexOf(depId))
                         .filter(idx => idx !== -1 && idx < index);
-                    
+
                     if (dependencyIndices.length > 0) {
                         // Use the last dependency (highest index) as the parent
                         // This ensures all previous dependencies complete first
@@ -236,13 +268,13 @@ export function BrainPanel() {
                     }
                 }
 
-                return {
+                tasks.push({
                     name: node.id, // Use node ID as task name for template placeholder matching
                     agent_type: node.agentType,
                     payload: node.inputs,
-                    parent_task_index: parentIndex
-                };
-            }).filter(t => t !== null) as any[];
+                    parent_task_index: parentIndex,
+                });
+            }
 
             const createdJobResponse = await createJob({
                 title: `AI Job: ${prompt.substring(0, 30)}...`,
@@ -348,7 +380,7 @@ export function BrainPanel() {
                                                 {analysisResult.explanation}
                                             </div>
                                             {analysisResult.workflow && (
-                                                <WorkflowVisualizer workflow={analysisResult.workflow} />
+                                                <WorkflowVisualizer workflow={analysisResult.workflow} taskStatusByName={taskStatusByName} />
                                             )}
                                         </div>
                                     )}
@@ -386,6 +418,11 @@ export function BrainPanel() {
                                 </div>
                             </CardHeader>
                             <CardContent className="space-y-4">
+                                {plannedWorkflow && (
+                                    <div className="rounded-md border bg-muted/20 p-3">
+                                        <WorkflowVisualizer workflow={plannedWorkflow} taskStatusByName={taskStatusByName} />
+                                    </div>
+                                )}
                                 {/* Tasks */}
                                 {jobTasks.length > 0 && (
                                     <div>
