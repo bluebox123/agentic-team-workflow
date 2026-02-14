@@ -80,7 +80,7 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
         if (field === "payload" && payloadKey) {
             newTasks[index].payload = { ...newTasks[index].payload, [payloadKey]: value };
         } else {
-            (newTasks[index] as Record<string, unknown>)[field] = value;
+            (newTasks[index] as unknown as Record<string, unknown>)[field] = value;
         }
         setTasks(newTasks);
     };
