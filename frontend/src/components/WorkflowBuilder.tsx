@@ -193,12 +193,11 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
     return (
         <div
             className={cn(
-                "relative px-4 py-3 rounded-lg border transition-all duration-200 min-w-[180px]",
-                selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105" : "",
+                "relative px-4 py-3 rounded-lg border bg-card transition-all duration-200 min-w-[180px]",
+                selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : "",
                 isHovered ? "shadow-lg" : ""
             )}
             style={{
-                background: 'bg-card',
                 borderColor: selected ? 'hsl(var(--primary))' : 'hsl(var(--border))',
             }}
             onMouseEnter={() => setIsHovered(true)}
