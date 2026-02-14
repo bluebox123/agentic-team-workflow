@@ -1,146 +1,274 @@
 /**
- * Manual Workflow Execution Test - bypasses Brain to test artifact quality
- * 
- * This script manually submits workflows derived from our earlier successful planning tests
- * to verify that the actual agent execution and artifact generation work correctly.
+ * Manual Workflow Execution Test - Tests real agent execution via API
+ *
+ * This script submits jobs via the backend API to verify that the orchestrator
+ * pipeline works correctly for manual job creation, including task execution,
+ * artifact generation, and job tracking.
  */
 
 import axios from 'axios';
-import * as fs from 'fs';
-import * as path from 'path';
 
-const API_BASE = 'http://localhost:4000/api';
+const API_BASE = process.env.API_BASE || 'http://localhost:4000/api';
 
-// Manually create a simple workflow based on our successful test case
-async function testSimpleAnalyzerArtifacts() {
-    console.log("\n=== Testing Analyzer Artifact Generation ===\n");
+// Helper to create a job and track execution
+async function createAndTrackJob(jobPayload: {
+  title: string;
+  tasks: Array<{
+    name: string;
+    agent_type: string;
+    payload: Record<string, unknown>;
+    parent_task_index?: number;
+  }>;
+}) {
+  console.log('\n📋 Job Payload:', JSON.stringify(jobPayload, null, 2));
 
+  // Step 1: Create job via API
+  console.log('\n[1/4] Creating job via backend API...');
+  const createResponse = await axios.post(`${API_BASE}/jobs`, jobPayload);
+  const jobId = createResponse.data.jobId || createResponse.data.id;
+
+  if (!jobId) {
+    throw new Error('No job ID returned from createJob');
+  }
+
+  console.log(`✅ Job created: ${jobId}`);
+
+  // Step 2: Poll for job completion
+  console.log('\n[2/4] Tracking job execution...');
+  let attempts = 0;
+  const maxAttempts = 60; // 5 minutes with 5-second intervals
+  let finalStatus = '';
+
+  while (attempts < maxAttempts) {
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    const statusResponse = await axios.get(`${API_BASE}/jobs/${jobId}`);
+    const job = statusResponse.data;
+    finalStatus = job.status;
+
+    console.log(`   Attempt ${attempts + 1}: Status = ${job.status}`);
+
+    // Fetch tasks progress
     try {
-        // Step 1: Create workflow directly via DB/API
-        console.log("[1/5] Creating workflow via backend API...");
-
-        const workflowPayload = {
-            name: "Manual Data Analysis Test",
-            description: "Test artifact generation for analyzer agent",
-            trigger_type: "manual"
-        };
-
-        // This will require auth, so let's try to POST to /jobs directly instead
-        const jobPayload = {
-            workflow_id: null, // Manual job
-            tasks: [
-                {
-                    id: "analyze_task_1",
-                    name: "data_analyzer",
-                    agent_type: "analyzer",
-                    payload: {
-                        data: [1, 2, 3, 4, 5, 10, 20, 30, 45, 100],
-                        analysis_type: "comprehensive"
-                    },
-                    dependencies: []
-                }
-            ]
-        };
-
-        console.log("Payload:", JSON.stringify(jobPayload, null, 2));
-
-        // Let's instead directly test the Python worker
-        console.log("\n[2/5] Testing Python worker directly...");
-
-        // Check if we can connect to RabbitMQ
-        const amqp = require('amqplib');
-        const connection = await amqp.connect('amqp://guest:guest@localhost:5672');
-        const channel = await connection.createChannel();
-
-        const queue = 'python_worker_queue';
-        await channel.assertQueue(queue, { durable: true });
-
-        console.log("✅ Connected to RabbitMQ");
-
-        const taskMessage = {
-            task_id: "test_analyzer_" + Date.now(),
-            job_id: "manual_test_job",
-            agent_type: "analyzer",
-            payload: {
-                data: [10, 20, 30, 40, 50, 100, 200, 300],
-                analysis_type: "comprehensive"
-            }
-        };
-
-        console.log("\n[3/5] Sending task to Python worker...");
-        channel.sendToQueue(queue, Buffer.from(JSON.stringify(taskMessage)), {
-            persistent: true
-        });
-
-        console.log("✅ Task sent:", taskMessage.task_id);
-
-        // Wait for result
-        console.log("\n[4/5] Waiting for result...");
-        await new Promise(resolve => setTimeout(resolve, 5000));
-
-        // Check MinIO for artifacts
-        console.log("\n[5/5] Checking MinIO for artifacts...");
-        const MinioClient = require('minio').Client;
-        const minioClient = new MinioClient({
-            endPoint: 'localhost',
-            port: 9000,
-            useSSL: false,
-            accessKey: 'minioadmin',
-            secretKey: 'minioadmin'
-        });
-
-        const bucket = 'artifacts';
-        const prefix = `jobs/${taskMessage.job_id}/`;
-
-        const stream = minioClient.listObjects(bucket, prefix, true);
-        const artifacts: any[] = [];
-
-        stream.on('data', (obj) => {
-            artifacts.push(obj);
-            console.log(`  Found: ${obj.name} (${obj.size} bytes)`);
-        });
-
-        stream.on('end', async () => {
-            console.log(`\n✅ Found ${artifacts.length} artifacts`);
-
-            if (artifacts.length > 0) {
-                // Download and inspect first artifact
-                const artifact = artifacts[0];
-                const localPath = path.join(__dirname, 'downloaded_artifact_test.json');
-
-                await minioClient.fGetObject(bucket, artifact.name, localPath);
-                console.log(`\n📥 Downloaded artifact to: ${localPath}`);
-
-                const content = fs.readFileSync(localPath, 'utf-8');
-                console.log(`\n📊 Artifact Content:`);
-                console.log(content);
-
-                // Quality assessment
-                const data = JSON.parse(content);
-                console.log(`\n=== ARTIFACT QUALITY ASSESSMENT ===`);
-                console.log(`Type: ${typeof data}`);
-                console.log(`Properties: ${Object.keys(data).join(', ')}`);
-
-                if (data.insights) console.log(`✅ Has insights field`);
-                if (data.statistics) console.log(`✅ Has statistics field`);
-
-                console.log(`\n🎯 User Satisfaction: ${artifacts.length > 0 ? 'SATISFIED' : 'NEEDS IMPROVEMENT'}`);
-            }
-
-            await channel.close();
-            await connection.close();
-        });
-
-        stream.on('error', (err) => {
-            console.error('MinIO error:', err);
-        });
-
-    } catch (error: any) {
-        console.error(`\n❌ Error: ${error.message}`);
-        if (error.response) {
-            console.error(`   Response:`, error.response.data);
-        }
+      const tasksResponse = await axios.get(`${API_BASE}/jobs/${jobId}/tasks`);
+      const tasks = tasksResponse.data || [];
+      const completed = tasks.filter((t: { status: string }) => t.status === 'SUCCESS').length;
+      console.log(`   Tasks: ${completed}/${tasks.length} completed`);
+    } catch (e) {
+      // Tasks endpoint might not exist yet
     }
+
+    if (job.status === 'SUCCESS' || job.status === 'FAILED') {
+      break;
+    }
+
+    attempts++;
+  }
+
+  // Step 3: Fetch final results
+  console.log('\n[3/4] Fetching execution results...');
+
+  // Get job details
+  const finalJobResponse = await axios.get(`${API_BASE}/jobs/${jobId}`);
+  const finalJob = finalJobResponse.data;
+
+  // Get tasks
+  let tasks: Array<Record<string, unknown>> = [];
+  try {
+    const tasksResponse = await axios.get(`${API_BASE}/jobs/${jobId}/tasks`);
+    tasks = tasksResponse.data || [];
+  } catch (e) {
+    console.log('   (Tasks endpoint not available)');
+  }
+
+  // Get artifacts
+  let artifacts: Array<Record<string, unknown>> = [];
+  try {
+    const artifactsResponse = await axios.get(`${API_BASE}/artifacts?job_id=${jobId}`);
+    artifacts = artifactsResponse.data || [];
+  } catch (e) {
+    console.log('   (Artifacts endpoint not available)');
+  }
+
+  // Get logs
+  let logs: Array<Record<string, unknown>> = [];
+  try {
+    if (tasks.length > 0) {
+      const latestTask = tasks[tasks.length - 1];
+      const logsResponse = await axios.get(`${API_BASE}/logs?task_id=${latestTask.id}`);
+      logs = logsResponse.data || [];
+    }
+  } catch (e) {
+    console.log('   (Logs endpoint not available)');
+  }
+
+  console.log(`\n📊 Final Status: ${finalStatus}`);
+  console.log(`📊 Tasks: ${tasks.length} total`);
+  console.log(`📊 Artifacts: ${artifacts.length} generated`);
+  console.log(`📊 Logs: ${logs.length} entries`);
+
+  // Step 4: Quality assessment
+  console.log('\n[4/4] Quality Assessment...');
+
+  const taskStatuses = tasks.map((t: { status: string; name: string }) => ({
+    name: t.name,
+    status: t.status
+  }));
+
+  console.log('\n   Task Statuses:');
+  taskStatuses.forEach((t: { name: string; status: string }) => {
+    const icon = t.status === 'SUCCESS' ? '✅' : t.status === 'FAILED' ? '❌' : '⏳';
+    console.log(`     ${icon} ${t.name}: ${t.status}`);
+  });
+
+  console.log('\n   Artifacts:');
+  artifacts.forEach((a: { filename?: string; type?: string; size?: number }) => {
+    console.log(`     📦 ${a.filename || 'unnamed'} (${a.type || 'unknown'}, ${a.size || 0} bytes)`);
+  });
+
+  const success = finalStatus === 'SUCCESS' && tasks.every((t: { status: string }) => t.status === 'SUCCESS');
+  console.log(`\n🎯 Result: ${success ? '✅ ALL TASKS SUCCEEDED' : '❌ SOME TASKS FAILED'}`);
+
+  return {
+    jobId,
+    status: finalStatus,
+    tasks,
+    artifacts,
+    logs,
+    success
+  };
 }
 
-testSimpleAnalyzerArtifacts().catch(console.error);
+// Test 1: Simple analyzer workflow
+async function testAnalyzerWorkflow() {
+  console.log('\n=== TEST 1: Analyzer Workflow ===\n');
+
+  return createAndTrackJob({
+    title: 'Test: Data Analysis',
+    tasks: [
+      {
+        name: 'data_analyzer',
+        agent_type: 'analyzer',
+        payload: {
+          data: [10, 20, 30, 40, 50, 100, 200, 300],
+          analysis_type: 'comprehensive'
+        }
+      }
+    ]
+  });
+}
+
+// Test 2: Multi-step workflow with dependencies
+async function testMultiStepWorkflow() {
+  console.log('\n=== TEST 2: Multi-Step Workflow ===\n');
+
+  return createAndTrackJob({
+    title: 'Test: Scrape → Analyze → Report',
+    tasks: [
+      {
+        name: 'scraper_task',
+        agent_type: 'scraper',
+        payload: {
+          url: 'https://example.com',
+          selector: 'body'
+        }
+      },
+      {
+        name: 'analyzer_task',
+        agent_type: 'analyzer',
+        payload: {
+          analysis_type: 'summary'
+        },
+        parent_task_index: 0 // Depends on scraper
+      },
+      {
+        name: 'designer_task',
+        agent_type: 'designer',
+        payload: {
+          title: 'Analysis Report',
+          sections: [
+            { heading: 'Results', content: '{{analyzer_task.output}}' }
+          ]
+        },
+        parent_task_index: 1 // Depends on analyzer
+      }
+    ]
+  });
+}
+
+// Test 3: Chart generation workflow
+async function testChartWorkflow() {
+  console.log('\n=== TEST 3: Chart Generation ===\n');
+
+  return createAndTrackJob({
+    title: 'Test: Create Sales Chart',
+    tasks: [
+      {
+        name: 'chart_task',
+        agent_type: 'chart',
+        payload: {
+          type: 'bar',
+          title: 'Monthly Sales',
+          x: ['Jan', 'Feb', 'Mar', 'Apr', 'May'],
+          y: [100, 150, 200, 180, 250],
+          x_label: 'Month',
+          y_label: 'Sales ($)'
+        }
+      }
+    ]
+  });
+}
+
+// Main execution
+async function main() {
+  console.log('╔════════════════════════════════════════════════════════════╗');
+  console.log('║     Manual Job Execution Test - Orchestrator Pipeline      ║');
+  console.log('╚════════════════════════════════════════════════════════════╝');
+  console.log(`\nAPI Base: ${API_BASE}`);
+
+  const results: Array<{ name: string; success: boolean }> = [];
+
+  try {
+    const result1 = await testAnalyzerWorkflow();
+    results.push({ name: 'Analyzer Workflow', success: result1.success });
+  } catch (error: any) {
+    console.error('\n❌ Test 1 failed:', error.message);
+    results.push({ name: 'Analyzer Workflow', success: false });
+  }
+
+  try {
+    const result2 = await testMultiStepWorkflow();
+    results.push({ name: 'Multi-Step Workflow', success: result2.success });
+  } catch (error: any) {
+    console.error('\n❌ Test 2 failed:', error.message);
+    results.push({ name: 'Multi-Step Workflow', success: false });
+  }
+
+  try {
+    const result3 = await testChartWorkflow();
+    results.push({ name: 'Chart Workflow', success: result3.success });
+  } catch (error: any) {
+    console.error('\n❌ Test 3 failed:', error.message);
+    results.push({ name: 'Chart Workflow', success: false });
+  }
+
+  // Summary
+  console.log('\n╔════════════════════════════════════════════════════════════╗');
+  console.log('║                      TEST SUMMARY                          ║');
+  console.log('╚════════════════════════════════════════════════════════════╝');
+
+  results.forEach((r) => {
+    const icon = r.success ? '✅' : '❌';
+    console.log(`   ${icon} ${r.name}`);
+  });
+
+  const allPassed = results.every((r) => r.success);
+  console.log(`\n🎯 Overall: ${allPassed ? '✅ ALL TESTS PASSED' : '❌ SOME TESTS FAILED'}`);
+
+  process.exit(allPassed ? 0 : 1);
+}
+
+main().catch((error) => {
+  console.error('\n💥 Fatal error:', error);
+  process.exit(1);
+});
