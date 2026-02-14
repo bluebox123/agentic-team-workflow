@@ -750,88 +750,68 @@ def run_analyzer(task_id, job_id, payload):
     
     data = payload.get("data", [])
     analysis_type = payload.get("analysis_type", "summary")
-    
-    # Initialize result dict for all code paths
-    result = {}
-    
+
+    # Build outputs that match the backend agent registry:
+    # - outputs.stats (json)
+    # - outputs.insights (string)
+    stats: dict = {}
+    insights: str = ""
+
     if not data:
-        content = json.dumps({"error": "No data provided for analysis"}).encode("utf-8")
-        result = {"error": "No data provided"}
-    elif analysis_type == "summary":
-        result = {
-            "count": len(data),
-            "mean": statistics.mean(data) if data else None,
-            "median": statistics.median(data) if data else None,
-            "min": min(data) if data else None,
-            "max": max(data) if data else None,
-        }
-        
-        # Add AI-powered insights
-        try:
-            ai_prompt = f"""Analyze this statistical data and provide insights:
+        stats = {"error": "No data provided for analysis"}
+        insights = "No data provided for analysis."
+    else:
+        if analysis_type == "summary":
+            stats = {
+                "count": len(data),
+                "mean": statistics.mean(data),
+                "median": statistics.median(data),
+                "min": min(data),
+                "max": max(data),
+            }
+
+            # Add AI-powered insights
+            try:
+                ai_prompt = f"""Analyze this statistical data and provide insights:
 
 Data: {data[:50]}  # First 50 points
 Statistics:
-- Count: {result['count']}
-- Mean: {result['mean']}
-- Median: {result['median']}
-- Min: {result['min']}
-- Max: {result['max']}
+- Count: {stats['count']}
+- Mean: {stats['mean']}
+- Median: {stats['median']}
+- Min: {stats['min']}
+- Max: {stats['max']}
 
 Provide 2-3 key insights about this data in plain language."""
-            
-            ai_insights = ai_helper.generate_ai_response(
-                ai_prompt,
-                task_type="analyzer",
-                temperature=0.5,
-                max_tokens=200
-            )
-            result["ai_insights"] = ai_insights
-            log_task(task_id, "INFO", "AI insights generated")
-        except Exception as e:
-            log_task(task_id, "WARN", f"AI insights failed: {e}")
-            result["ai_insights"] = "AI analysis unavailable"
-        
-        content = json.dumps(result, indent=2).encode("utf-8")
-        
-    elif analysis_type == "trend":
-        # Simple trend detection
-        increasing = all(data[i] <= data[i+1] for i in range(len(data)-1))
-        decreasing = all(data[i] >= data[i+1] for i in range(len(data)-1))
-        trend = "increasing" if increasing else "decreasing" if decreasing else "mixed"
-        
-        result = {
-            "trend": trend,
-            "data_points": len(data),
-            "count": len(data)
-        }
-        
-        # Add AI-powered insights for trend
-        try:
-            ai_prompt = f"""Analyze this trend data and provide insights:
 
-Data Points: {data[:50]}
-Trend Direction: {trend}
-Number of Data Points: {len(data)}
+                insights = ai_helper.generate_ai_response(
+                    ai_prompt,
+                    task_type="analyzer",
+                    temperature=0.5,
+                    max_tokens=200,
+                )
+                log_task(task_id, "INFO", "AI insights generated")
+            except Exception as e:
+                log_task(task_id, "WARN", f"AI insights failed: {e}")
+                insights = "AI analysis unavailable"
 
-Provide 2-3 key insights about this trend in plain language."""
-            
-            ai_insights = ai_helper.generate_ai_response(
-                ai_prompt,
-                task_type="analyzer",
-                temperature=0.5,
-                max_tokens=200
-            )
-            result["ai_insights"] = ai_insights
-            log_task(task_id, "INFO", "AI trend insights generated")
-        except Exception as e:
-            log_task(task_id, "WARN", f"AI insights failed: {e}")
-            result["ai_insights"] = "AI analysis unavailable"
-        
-        content = json.dumps(result, indent=2).encode("utf-8")
-    else:
-        result = {"analysis": "completed", "type": analysis_type, "count": len(data) if data else 0}
-        content = json.dumps(result, indent=2).encode("utf-8")
+        elif analysis_type == "trend":
+            increasing = all(data[i] <= data[i + 1] for i in range(len(data) - 1))
+            decreasing = all(data[i] >= data[i + 1] for i in range(len(data) - 1))
+            trend = "increasing" if increasing else "decreasing" if decreasing else "mixed"
+            stats = {
+                "trend": trend,
+                "data_points": len(data),
+                "first": data[0] if data else None,
+                "last": data[-1] if data else None,
+            }
+            insights = f"Detected a {trend} trend across {len(data)} data points."
+
+        else:
+            stats = {"analysis_type": analysis_type, "data_points": len(data)}
+            insights = f"Analysis completed for type '{analysis_type}'."
+
+    content = json.dumps({"stats": stats, "insights": insights}, indent=2).encode("utf-8")
     
     object_key = f"jobs/{job_id}/{task_id}_analysis.json"
     s3_client.put_object(
@@ -848,13 +828,8 @@ Provide 2-3 key insights about this trend in plain language."""
                 "ok": True,
                 "job_id": job_id,
                 "executor": "analyzer",
-                "count": result.get("count"),
-                "mean": result.get("mean"),
-                "median": result.get("median"),
-                "min": result.get("min"),
-                "max": result.get("max"),
-                "trend": result.get("trend"),
-                "insights": result.get("ai_insights", "Analysis completed")
+                "stats": stats,
+                "insights": insights,
             },
             "artifact": {"type": "json", "filename": "analysis.json", "storage_key": object_key}
         },
