@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Component, useCallback, useState, type ElementType, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, Trash2, GripVertical, Play, CheckCircle, Smartphone, Layers, RefreshCcw, BarChart, PenTool, Calculator, FileText, Shield, ArrowLeftRight, Bell, Globe, LayoutGrid, List } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -20,6 +20,46 @@ interface CreateJobDialogProps {
     onSuccess: () => void;
 }
 
+class VisualBuilderErrorBoundary extends Component<
+    { onBackToList: () => void; children: ReactNode },
+    { hasError: boolean; errorMessage: string }
+> {
+    constructor(props: { onBackToList: () => void; children: ReactNode }) {
+        super(props);
+        this.state = { hasError: false, errorMessage: "" };
+    }
+
+    static getDerivedStateFromError(error: unknown) {
+        return {
+            hasError: true,
+            errorMessage: error instanceof Error ? error.message : "Visual builder crashed",
+        };
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="h-full w-full flex items-center justify-center p-6">
+                    <div className="max-w-md w-full border rounded-lg bg-card p-4">
+                        <div className="text-sm font-medium mb-2">Visual Builder Error</div>
+                        <div className="text-xs text-muted-foreground whitespace-pre-wrap break-words mb-4">
+                            {this.state.errorMessage}
+                        </div>
+                        <div className="flex gap-2">
+                            <Button variant="outline" onClick={() => this.setState({ hasError: false, errorMessage: "" })}>
+                                Retry
+                            </Button>
+                            <Button onClick={this.props.onBackToList}>Back to List View</Button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        return this.props.children;
+    }
+}
+
 type TaskType = "executor" | "reviewer" | "designer" | "chart" | "analyzer" | "summarizer" | "validator" | "transformer" | "notifier" | "scraper";
 
 interface BuilderTask extends TaskConfig {
@@ -27,7 +67,7 @@ interface BuilderTask extends TaskConfig {
     type: TaskType;
 }
 
-const availableTasks: { type: TaskType; label: string; icon: React.ElementType; defaultPayload: Record<string, unknown> }[] = [
+const availableTasks: { type: TaskType; label: string; icon: ElementType; defaultPayload: Record<string, unknown> }[] = [
     { type: "executor", label: "Executor Agent", icon: Smartphone, defaultPayload: { prompt: "" } },
     { type: "reviewer", label: "Reviewer Agent", icon: CheckCircle, defaultPayload: { criteria: "" } },
     { type: "designer", label: "Designer Agent", icon: PenTool, defaultPayload: { title: "New Report", sections: [{ heading: "Introduction", content: "This is a default section." }] } },
@@ -85,7 +125,7 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
         setTasks(newTasks);
     };
 
-    const handleVisualWorkflowChange = (workflow: WorkflowDAG) => {
+    const handleVisualWorkflowChange = useCallback((workflow: WorkflowDAG) => {
         setVisualWorkflow(workflow);
         const executionOrder = workflow.executionOrder || workflow.nodes.map((n: { id: string }) => n.id);
         const newTasks = executionOrder.map((nodeId: string, index: number) => {
@@ -114,7 +154,7 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
         }).filter((t): t is NonNullable<typeof t> => t !== null);
 
         setTasks(newTasks);
-    };
+    }, []);
 
     const handleSubmit = async () => {
         if (!title) { setError("Title is required"); return; }
@@ -126,7 +166,12 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
         try {
             const jobPayload = {
                 title,
-                tasks: tasks.map((t) => ({ ...t, id: undefined, type: undefined })).map(({ id: _id, type: _type, ...rest }) => rest)
+                tasks: tasks.map((t) => {
+                    const { id, type, ...rest } = t;
+                    void id;
+                    void type;
+                    return rest;
+                })
             };
             await createJob(jobPayload);
 
@@ -325,12 +370,14 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
 
                             <TabsContent value="visual" className="flex-1 m-0 p-0 relative" style={{ minHeight: '400px' }}>
                                 <div className="absolute inset-0">
-                                    <WorkflowBuilder
-                                        key="visual-builder"
-                                        workflow={visualWorkflow || undefined}
-                                        onWorkflowChange={handleVisualWorkflowChange}
-                                        mode="build"
-                                    />
+                                    <VisualBuilderErrorBoundary onBackToList={() => setActiveTab('list')}>
+                                        <WorkflowBuilder
+                                            key="visual-builder"
+                                            workflow={visualWorkflow || undefined}
+                                            onWorkflowChange={handleVisualWorkflowChange}
+                                            mode="build"
+                                        />
+                                    </VisualBuilderErrorBoundary>
                                 </div>
                             </TabsContent>
                         </Tabs>

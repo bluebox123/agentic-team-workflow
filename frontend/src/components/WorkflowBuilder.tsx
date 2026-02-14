@@ -34,8 +34,8 @@ import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Label } from './ui/label';
 import { Badge } from './ui/badge';
-import { ScrollArea } from './ui/scroll-area';
-import { Separator } from './ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import { cn } from '../lib/utils';
 import type { WorkflowDAG, WorkflowNode, WorkflowEdge } from '../api/brain';
 
@@ -551,6 +551,11 @@ function FlowCanvas({
     const { project, fitView } = useReactFlow();
     const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
+    const onWorkflowChangeRef = useRef<typeof onWorkflowChange>(onWorkflowChange);
+    useEffect(() => {
+        onWorkflowChangeRef.current = onWorkflowChange;
+    }, [onWorkflowChange]);
+
     // Convert initial workflow to nodes/edges (without handlers first)
     const getInitialNodes = useCallback((): Node<AgentNodeData>[] => {
         if (!initialWorkflow?.nodes) return [];
@@ -595,14 +600,19 @@ function FlowCanvas({
     const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
     const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
+    const selectedNodeIdRef = useRef<string | null>(null);
+    useEffect(() => {
+        selectedNodeIdRef.current = selectedNodeId;
+    }, [selectedNodeId]);
+
     // Handler functions - defined AFTER state hooks
     const handleDeleteNode = useCallback((id: string) => {
         setNodes((nds) => nds.filter((n) => n.id !== id));
         setEdges((eds) => eds.filter((e) => e.source !== id && e.target !== id));
-        if (selectedNodeId === id) {
+        if (selectedNodeIdRef.current === id) {
             setSelectedNodeId(null);
         }
-    }, [setNodes, setEdges, selectedNodeId]);
+    }, [setNodes, setEdges]);
 
     const handleEditNode = useCallback((id: string) => {
         setSelectedNodeId(id);
@@ -726,8 +736,8 @@ function FlowCanvas({
     // Export workflow whenever nodes/edges change
     useEffect(() => {
         const workflow = buildWorkflowDAG();
-        onWorkflowChange?.(workflow);
-    }, [nodes, edges, buildWorkflowDAG, onWorkflowChange]);
+        onWorkflowChangeRef.current?.(workflow);
+    }, [nodes, edges, buildWorkflowDAG]);
 
     const onConnect = useCallback((params: Connection) => {
         setEdges((eds) => addEdge({
