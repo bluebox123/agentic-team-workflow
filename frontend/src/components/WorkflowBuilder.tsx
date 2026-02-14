@@ -193,7 +193,7 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
     return (
         <div
             className={cn(
-                "relative px-4 py-3 rounded-lg border bg-card transition-all duration-200 min-w-[180px]",
+                "relative px-4 py-3 rounded-lg border bg-card transition-all duration-200 min-w-[180px] max-w-[250px]",
                 selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : "",
                 isHovered ? "shadow-lg" : ""
             )}
@@ -253,7 +253,7 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
                 </div>
                 
                 {/* Title */}
-                <div className="text-sm font-medium text-foreground mb-1">
+                <div className="text-sm font-medium text-foreground mb-1 truncate">
                     {agentType.name}
                 </div>
                 
@@ -262,8 +262,8 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
                     {Object.keys(data.inputs).length > 0 ? (
                         <div className="space-y-0.5">
                             {Object.entries(data.inputs).slice(0, 3).map(([key, value]) => (
-                                <div key={key} className="flex items-center gap-1 truncate">
-                                    <span className="text-muted-foreground">{key}:</span>
+                                <div key={key} className="flex items-center gap-1 min-w-0">
+                                    <span className="text-muted-foreground flex-shrink-0">{key}:</span>
                                     <span className="truncate font-mono">
                                         {typeof value === 'string' ? value.slice(0, 20) : JSON.stringify(value).slice(0, 20)}
                                     </span>

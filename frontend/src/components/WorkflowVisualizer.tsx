@@ -64,7 +64,7 @@ const AgentNode = ({
 
     return (
         <div
-            className={`px-4 py-3 shadow-2xl rounded-lg border-2 transition-all duration-500 hover:scale-105 hover:-rotate-1 cursor-pointer group relative ${
+            className={`px-4 py-3 shadow-2xl rounded-lg border-2 transition-all duration-500 hover:scale-105 hover:-rotate-1 cursor-pointer group relative max-w-[250px] ${
                 isRunning ? 'animate-[nodePulse_1.8s_ease-in-out_infinite]' : ''
             }`}
             style={{
@@ -84,19 +84,19 @@ const AgentNode = ({
                 position={Position.Top}
                 className="w-3 h-3 !bg-white/80 !border-2 !border-white/50 transition-all duration-300 group-hover:!bg-yellow-400 group-hover:scale-125"
             />
-            <div className="flex flex-col">
-                <div className="text-base font-bold text-white drop-shadow-lg mb-1 flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${statusDotClass}`} />
-                    {data.label}
+            <div className="flex flex-col min-w-0">
+                <div className="text-base font-bold text-white drop-shadow-lg mb-1 flex items-center gap-2 truncate">
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${statusDotClass}`} />
+                    <span className="truncate">{data.label}</span>
                     {taskStatus && (
-                        <span className="ml-auto text-[10px] px-2 py-0.5 rounded bg-black/30 text-white/80 border border-white/10">
+                        <span className="ml-auto text-[10px] px-2 py-0.5 rounded bg-black/30 text-white/80 border border-white/10 flex-shrink-0">
                             {taskStatus}
                         </span>
                     )}
                 </div>
-                <div className="text-[10px] text-white/80 bg-black/20 rounded px-2 py-1 backdrop-blur-sm">
+                <div className="text-[10px] text-white/80 bg-black/20 rounded px-2 py-1 backdrop-blur-sm overflow-hidden">
                     {data.inputs && typeof data.inputs === 'object' && Object.keys(data.inputs as object).length > 0 ? (
-                        <pre className="line-clamp-2 overflow-hidden">{JSON.stringify(data.inputs, null, 2)}</pre>
+                        <pre className="line-clamp-2 overflow-hidden text-ellipsis break-all">{JSON.stringify(data.inputs, null, 2)}</pre>
                     ) : (
                         <span className="italic">No inputs</span>
                     )}
@@ -116,11 +116,23 @@ const nodeTypes = {
 };
 
 export function WorkflowVisualizer({ workflow, taskStatusByName }: WorkflowVisualizerProps) {
+    // Debug logging
+    console.log('[WorkflowVisualizer] Render:', { 
+        hasWorkflow: !!workflow, 
+        nodeCount: workflow?.nodes?.length || 0,
+        edgeCount: workflow?.edges?.length || 0,
+        taskStatusCount: Object.keys(taskStatusByName || {}).length
+    });
 
     // Transform WorkflowDAG to ReactFlow nodes/edges
     const { nodes, edges } = useMemo(() => {
-        const rfNodes: Node[] = [];
-        const rfEdges: Edge[] = [];
+        if (!workflow || !workflow.nodes || workflow.nodes.length === 0) {
+            return { nodes: [], edges: [] };
+        }
+        
+        try {
+            const rfNodes: Node[] = [];
+            const rfEdges: Edge[] = [];
 
         const xGap = 280;
         const yGap = 120;
@@ -197,6 +209,10 @@ export function WorkflowVisualizer({ workflow, taskStatusByName }: WorkflowVisua
         });
 
         return { nodes: rfNodes, edges: rfEdges };
+        } catch (err) {
+            console.error('[WorkflowVisualizer] Error creating nodes/edges:', err);
+            return { nodes: [], edges: [] };
+        }
     }, [workflow, taskStatusByName]);
 
     return (
