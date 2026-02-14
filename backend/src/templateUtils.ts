@@ -52,6 +52,33 @@ export async function resolveTaskInputs(
             outputs: rawResult
         };
 
+        // Alias analyzer task names so templates remain stable even if the planner
+        // chooses different node IDs like 'analyze' vs 'analyzer_node'.
+        // This avoids placeholders like {{tasks.analyzer_node.outputs.insights}} showing up.
+        const nameLower = String(row.name || "").toLowerCase();
+        const isAnalyzerTaskName =
+            nameLower === "analyze" ||
+            nameLower === "analyzer" ||
+            nameLower === "analyzer_node" ||
+            nameLower.endsWith("_analyze") ||
+            nameLower.endsWith("_analyzer") ||
+            nameLower.endsWith("_analyzer_node") ||
+            nameLower.includes("analyzer") ||
+            nameLower.includes("analyze");
+
+        if (isAnalyzerTaskName) {
+            // Only fill alias keys if they don't already exist (avoid overwriting real tasks)
+            if (!context.tasks["analyzer_node"]) {
+                context.tasks["analyzer_node"] = { outputs: rawResult };
+            }
+            if (!context.tasks["analyze"]) {
+                context.tasks["analyze"] = { outputs: rawResult };
+            }
+            if (!context.tasks["analyzer"]) {
+                context.tasks["analyzer"] = { outputs: rawResult };
+            }
+        }
+
         if (parentTaskId && row.id === parentTaskId) {
             context.parent = {
                 outputs: rawResult
