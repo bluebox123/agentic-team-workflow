@@ -14,6 +14,46 @@ import { AuthRequest } from "../auth";
 const router = Router();
 
 /**
+ * POST /api/jobs/:jobId/generate-report-pdf
+ * Enqueue a designer task to generate a LaTeX/Tectonic PDF artifact.
+ */
+router.post("/jobs/:jobId/generate-report-pdf", async (req: AuthRequest, res: Response) => {
+  const { jobId } = req.params;
+  const { title, sections, style } = req.body || {};
+
+  if (!Array.isArray(sections) || sections.length === 0) {
+    return res.status(400).json({ error: "sections must be a non-empty array" });
+  }
+
+  try {
+    const maxOrder = await pool.query(
+      `SELECT COALESCE(MAX(order_index), -1) AS max_order FROM tasks WHERE job_id = $1`,
+      [jobId]
+    );
+    const nextOrder = Number(maxOrder.rows[0]?.max_order ?? -1) + 1;
+
+    const payload = {
+      title: typeof title === "string" && title.trim() ? title.trim() : "Generated Report",
+      sections,
+      style: typeof style === "object" && style ? style : {},
+    };
+
+    const inserted = await pool.query(
+      `
+      INSERT INTO tasks (job_id, name, agent_type, payload, status, order_index, created_at)
+      VALUES ($1, $2, $3, $4, 'PENDING', $5, NOW())
+      RETURNING id
+      `,
+      [jobId, "Generate Report PDF", "designer", payload, nextOrder]
+    );
+
+    res.json({ ok: true, task_id: inserted.rows[0].id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * GET /api/jobs/:jobId/artifacts
  */
 router.get("/jobs/:jobId/artifacts", async (req, res) => {

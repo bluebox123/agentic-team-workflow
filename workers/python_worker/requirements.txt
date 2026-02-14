@@ -11,3 +11,4 @@ perplexityai[client]
 beautifulsoup4
 lxml
 tenacity
+Jinja2

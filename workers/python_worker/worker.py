@@ -14,6 +14,7 @@ from weasyprint import HTML
 import matplotlib.pyplot as plt
 from bs4 import BeautifulSoup
 import ai_helper
+import latex_pdf
 
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
@@ -526,12 +527,21 @@ def run_designer(task_id, job_id, payload):
     
     # Render HTML with both explicit artifacts and fetched artifacts
     # This allows resolution of both structured and string references
-    html = render_html(title, sections, artifacts, all_job_artifacts)
+    combined_artifacts = artifacts + all_job_artifacts
     
     # Generate PDF
     try:
-        pdf_bytes = HTML(string=html).write_pdf()
-        log_task(task_id, "INFO", f"Designer generated PDF ({len(pdf_bytes)} bytes)")
+        pdf_bytes, latex_metadata = latex_pdf.generate_pdf_from_payload(
+            payload={
+                **payload,
+                "title": title,
+                "sections": sections,
+            },
+            all_job_artifacts=combined_artifacts,
+            s3_client=s3_client,
+            s3_bucket=MINIO_BUCKET,
+        )
+        log_task(task_id, "INFO", f"Designer generated PDF via LaTeX ({len(pdf_bytes)} bytes)")
         
         # Upload to S3
         object_key = f"jobs/{job_id}/{task_id}.pdf"
@@ -564,6 +574,8 @@ def run_designer(task_id, job_id, payload):
                         "section_count": len(sections),
                         "role": role,
                         "deterministic_ordering": True
+                        ,
+                        "latex": latex_metadata
                     }
                 }
             },
