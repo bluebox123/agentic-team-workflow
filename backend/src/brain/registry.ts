@@ -34,7 +34,8 @@ export const AGENT_REGISTRY: AgentCapability[] = [
         description: "Performs statistical analysis on numeric data.",
         category: "process",
         inputs: [
-            { name: "data", type: "array", description: "Array of numbers to analyze", required: true },
+            { name: "data", type: "array", description: "Array of numbers to analyze", required: false },
+            { name: "text", type: "string", description: "Text to analyze when numeric data is not available", required: false },
             { name: "analysis_type", type: "string", description: "'summary' or 'trend'", required: false },
         ],
         outputs: [
@@ -72,13 +73,17 @@ export const AGENT_REGISTRY: AgentCapability[] = [
     {
         id: "chart",
         name: "Chart Generator",
-        description: "Generates a chart image from data.",
+        description: "Generates a chart image from data or text.",
         category: "output",
         inputs: [
-            { name: "title", type: "string", description: "Chart title", required: true },
-            { name: "type", type: "string", description: "Chart type (bar, line)", required: true },
-            { name: "x", type: "array", description: "X-axis data", required: true },
-            { name: "y", type: "array", description: "Y-axis data", required: true },
+            { name: "title", type: "string", description: "Chart title", required: false },
+            { name: "type", type: "string", description: "Chart type (line, bar, scatter, area, pie, histogram)", required: false },
+            { name: "text", type: "string", description: "Natural language instruction/context to infer a chart spec", required: false },
+            { name: "x", type: "array", description: "X-axis data", required: false },
+            { name: "y", type: "array", description: "Y-axis data", required: false },
+            { name: "labels", type: "array", description: "Category labels for pie/bar charts", required: false },
+            { name: "values", type: "array", description: "Category values for pie/histogram charts", required: false },
+            { name: "bins", type: "number", description: "Histogram bins", required: false },
             { name: "x_label", type: "string", description: "X-axis label", required: false },
             { name: "y_label", type: "string", description: "Y-axis label", required: false },
             { name: "role", type: "string", description: "Role for report generation", required: true },

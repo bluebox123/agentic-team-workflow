@@ -923,6 +923,7 @@ def run_analyzer(task_id, job_id, payload):
     import statistics
     
     data = payload.get("data", [])
+    text = payload.get("text", "")
     analysis_type = payload.get("analysis_type", "summary")
 
     # Build outputs that match the backend agent registry:
@@ -932,8 +933,37 @@ def run_analyzer(task_id, job_id, payload):
     insights: str = ""
 
     if not data:
-        stats = {"error": "No data provided for analysis"}
-        insights = "No data provided for analysis."
+        if isinstance(text, str) and text.strip():
+            # Text-only analysis path
+            try:
+                ai_prompt = f"""Analyze the following text and provide a concise analytical interpretation.
+
+Requirements:
+- Identify key themes and entities.
+- Provide 2-4 actionable insights.
+- If the text implies comparisons, categories, or rankings, call them out.
+
+Text:
+{text[:4000]}
+"""
+
+                insights = ai_helper.generate_ai_response(
+                    ai_prompt,
+                    task_type="analyzer",
+                    temperature=0.4,
+                    max_tokens=350,
+                )
+                stats = {
+                    "analysis_mode": "text",
+                    "text_length": len(text),
+                }
+            except Exception as e:
+                log_task(task_id, "WARN", f"Text analysis failed: {e}")
+                stats = {"analysis_mode": "text", "text_length": len(text)}
+                insights = "AI analysis unavailable"
+        else:
+            stats = {"error": "No data provided for analysis"}
+            insights = "No data provided for analysis."
     else:
         if analysis_type == "summary":
             stats = {
