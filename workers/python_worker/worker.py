@@ -887,6 +887,30 @@ User text:
         "role": role  # Explicitly store role in metadata
     }
 
+    # Generate chart description/explanation
+    chart_description = ""
+    try:
+        desc_prompt = f"""Describe this chart in 1-2 sentences:
+
+Chart Type: {chart_type}
+Title: {title}
+X-axis: {x_label} (data points: {len(x_num) if x_num else 0})
+Y-axis: {y_label}
+Data: {str(x_num[:5]) if x_num else str(values_num[:5])}...
+
+Provide a brief, clear explanation of what this chart shows."""
+
+        chart_description = ai_helper.generate_ai_response(
+            desc_prompt,
+            task_type="chart",
+            temperature=0.4,
+            max_tokens=150,
+        )
+        log_task(task_id, "INFO", "Chart description generated")
+    except Exception as e:
+        log_task(task_id, "WARN", f"Chart description generation failed: {e}")
+        chart_description = f"{chart_type.capitalize()} chart showing {title.lower()}."
+
     requests.post(
         f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
         json={
@@ -894,25 +918,26 @@ User text:
                 "ok": True,
                 "job_id": job_id,
                 "executor": "chart",
-                "image_url": f"/api/artifacts/{task_id}/download",  # URL for reference
-                "storage_key": object_key,  # Storage key for direct access
-                "role": role,  # Role for artifact matching
+                "image_url": f"/api/artifacts/{task_id}/download",
+                "storage_key": object_key,
+                "role": role,
                 "chart_type": chart_type,
-                "data_points": data_points
+                "data_points": data_points,
+                "description": chart_description,
             },
             "artifact": {
                 "type": "chart",
                 "filename": filename,
                 "storage_key": object_key,
-                "role": role,  # Phase 8.4.2: Mandatory role field
-                "metadata": artifact_metadata
+                "role": role,
+                "metadata": {**artifact_metadata, "description": chart_description}
             }
         },
         timeout=5,
     )
 
     worker_tasks_total.labels(result="success").inc()
-    log_task(task_id, "INFO", f"Chart generated: {chart_type} with {len(x)} data points, role='{role}'")
+    log_task(task_id, "INFO", f"Chart generated: {chart_type} with {data_points} data points, role='{role}', desc='{chart_description[:50]}...'")
 
 
 # -------------------------

@@ -90,6 +90,7 @@ export const AGENT_REGISTRY: AgentCapability[] = [
         ],
         outputs: [
             { name: "image_url", type: "string", description: "URL of generated chart image" },
+            { name: "description", type: "string", description: "Brief 1-2 sentence explanation of what the chart shows" },
         ],
     },
     {
