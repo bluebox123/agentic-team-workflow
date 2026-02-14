@@ -39,6 +39,12 @@ export async function resolveTaskInputs(
         console.log(`[TEMPLATE] Task '${row.name}': raw result keys=${Object.keys(rawResult).join(', ')}`);
         console.log(`[TEMPLATE] Task '${row.name}': text present=${'text' in rawResult}, text length=${rawResult.text?.length || 0}`);
         
+        // DEBUG: Special logging for analyzer tasks
+        if (row.name && (row.name.includes('analyze') || row.name.includes('analyzer'))) {
+            console.log(`[TEMPLATE] ANALYZER TASK '${row.name}': full result=${JSON.stringify(row.result).substring(0, 200)}`);
+            console.log(`[TEMPLATE] ANALYZER TASK '${row.name}': insights present=${'insights' in rawResult}, insights value=${rawResult.insights?.substring(0, 50)}`);
+        }
+        
         // Store the outputs with the raw result data
         // This ensures tasks.X.outputs.result works if the data has a result field
         // or tasks.X.outputs works for direct access
