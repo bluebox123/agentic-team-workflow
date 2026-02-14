@@ -5,7 +5,6 @@ import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
 import { WorkflowVisualizer } from './WorkflowVisualizer';
-import { WorkflowBuilder } from './WorkflowBuilder';
 import { analyzeRequest, type BrainAnalysisResult } from '../api/brain';
 import { createJob, fetchJobTasks, fetchJobs, type Job } from '../api/jobs';
 import { fetchArtifacts, fetchArtifactBlob, fetchArtifactText, type Artifact } from '../api/artifacts';
@@ -355,68 +354,6 @@ export function BrainPanel() {
                                     )}
                                 </div>
                             )}
-
-                            {/* Manual Workflow Builder Section */}
-                            <div className="mt-8 pt-6 border-t">
-                                <div className="flex items-center justify-between mb-4">
-                                    <h3 className="text-lg font-semibold flex items-center gap-2">
-                                        <Sparkles className="w-5 h-5 text-indigo-500" />
-                                        Manual Workflow Builder
-                                    </h3>
-                                    <p className="text-sm text-muted-foreground">
-                                        Or build your workflow visually
-                                    </p>
-                                </div>
-                                <WorkflowBuilder
-                                    mode="build"
-                                    onExecute={async (workflow) => {
-                                        setIsExecuting(true);
-                                        try {
-                                            // Convert workflow DAG to tasks format
-                                            const executionOrder = workflow.executionOrder || workflow.nodes.map(n => n.id);
-                                            
-                                            const tasks = executionOrder.map((nodeId, index) => {
-                                                const node = workflow.nodes.find(n => n.id === nodeId);
-                                                if (!node) return null;
-
-                                                let parentIndex: number | undefined = undefined;
-                                                if (node.dependencies.length > 0) {
-                                                    const dependencyIndices = node.dependencies
-                                                        .map(depId => executionOrder.indexOf(depId))
-                                                        .filter(idx => idx !== -1 && idx < index);
-                                                    
-                                                    if (dependencyIndices.length > 0) {
-                                                        parentIndex = Math.max(...dependencyIndices);
-                                                    }
-                                                }
-
-                                                return {
-                                                    name: node.id,
-                                                    agent_type: node.agentType,
-                                                    payload: node.inputs,
-                                                    parent_task_index: parentIndex
-                                                };
-                                            }).filter(t => t !== null) as any[];
-
-                                            const createdJobResponse = await createJob({
-                                                title: `Manual Workflow: ${new Date().toLocaleString()}`,
-                                                tasks: tasks
-                                            });
-
-                                            setExecutionStatus("Job started successfully!");
-
-                                            if (createdJobResponse && createdJobResponse.jobId) {
-                                                await startJobTracking(createdJobResponse.jobId);
-                                            }
-                                        } catch (error) {
-                                            console.error(error);
-                                            setExecutionStatus("Execution failed.");
-                                        } finally {
-                                            setIsExecuting(false);
-                                        }
-                                    }}
-                                />
-                            </div>
                         </CardContent>
                     </Card>
 

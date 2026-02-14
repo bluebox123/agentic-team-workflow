@@ -82,8 +82,8 @@ const AGENT_TYPES: AgentType[] = [
         name: 'Scraper',
         description: 'Extract content from web pages',
         icon: '🌐',
-        color: '#667eea',
-        gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        color: '#64748b',
+        gradient: 'linear-gradient(135deg, #64748b 0%, #475569 100%)',
         inputs: [
             { name: 'url', type: 'string', required: true, description: 'URL to scrape' },
             { name: 'selector', type: 'string', required: false, description: 'CSS selector (optional)' },
@@ -95,8 +95,8 @@ const AGENT_TYPES: AgentType[] = [
         name: 'Analyzer',
         description: 'Generate insights from data or text',
         icon: '🔍',
-        color: '#f093fb',
-        gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+        color: '#0ea5e9',
+        gradient: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
         inputs: [
             { name: 'text', type: 'string', required: false, description: 'Text content to analyze' },
             { name: 'data', type: 'array', required: false, description: 'Structured data for analysis' },
@@ -108,8 +108,8 @@ const AGENT_TYPES: AgentType[] = [
         name: 'Chart',
         description: 'Create data visualizations',
         icon: '📊',
-        color: '#4facfe',
-        gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+        color: '#8b5cf6',
+        gradient: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
         inputs: [
             { name: 'data', type: 'array', required: true, description: 'Data points or series' },
             { name: 'type', type: 'string', required: true, description: 'Chart type (bar, line, pie, etc)' },
@@ -123,8 +123,8 @@ const AGENT_TYPES: AgentType[] = [
         name: 'Designer',
         description: 'Generate PDF reports',
         icon: '🎨',
-        color: '#43e97b',
-        gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+        color: '#10b981',
+        gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
         inputs: [
             { name: 'sections', type: 'array', required: true, description: 'Report sections' },
             { name: 'title', type: 'string', required: true, description: 'Report title' },
@@ -137,8 +137,8 @@ const AGENT_TYPES: AgentType[] = [
         name: 'Summarizer',
         description: 'Condense long text into summaries',
         icon: '📝',
-        color: '#fa709a',
-        gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
+        color: '#f59e0b',
+        gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
         inputs: [
             { name: 'text', type: 'string', required: true, description: 'Text to summarize' },
             { name: 'max_length', type: 'number', required: false, description: 'Max summary length' }
@@ -149,8 +149,8 @@ const AGENT_TYPES: AgentType[] = [
         name: 'Validator',
         description: 'Validate data against schema',
         icon: '✓',
-        color: '#30cfd0',
-        gradient: 'linear-gradient(135deg, #30cfd0 0%, #330867 100%)',
+        color: '#06b6d4',
+        gradient: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
         inputs: [
             { name: 'data', type: 'unknown', required: true, description: 'Data to validate' },
             { name: 'schema', type: 'object', required: true, description: 'Validation schema' }
@@ -161,8 +161,8 @@ const AGENT_TYPES: AgentType[] = [
         name: 'Transformer',
         description: 'Transform data formats',
         icon: '🔄',
-        color: '#a8edea',
-        gradient: 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
+        color: '#ec4899',
+        gradient: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)',
         inputs: [
             { name: 'data', type: 'unknown', required: true, description: 'Data to transform' },
             { name: 'operation', type: 'string', required: true, description: 'Transform operation' }
@@ -173,8 +173,8 @@ const AGENT_TYPES: AgentType[] = [
         name: 'Notifier',
         description: 'Send notifications',
         icon: '🔔',
-        color: '#ffecd2',
-        gradient: 'linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%)',
+        color: '#f97316',
+        gradient: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
         inputs: [
             { name: 'message', type: 'string', required: true, description: 'Message to send' },
             { name: 'channel', type: 'string', required: true, description: 'Notification channel' }
@@ -193,16 +193,13 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
     return (
         <div
             className={cn(
-                "relative px-4 py-3 rounded-xl border-2 transition-all duration-200 min-w-[180px]",
-                selected ? "ring-2 ring-white ring-offset-2 ring-offset-slate-900 scale-105" : "",
-                isHovered ? "scale-102 shadow-2xl" : ""
+                "relative px-4 py-3 rounded-lg border transition-all duration-200 min-w-[180px]",
+                selected ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-105" : "",
+                isHovered ? "shadow-lg" : ""
             )}
             style={{
-                background: agentType.gradient,
-                borderColor: selected ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.3)',
-                boxShadow: selected 
-                    ? '0 20px 60px rgba(0, 0, 0, 0.4), 0 0 30px rgba(102, 126, 234, 0.6)'
-                    : '0 10px 40px rgba(0, 0, 0, 0.3), 0 0 20px rgba(102, 126, 234, 0.3)',
+                background: 'bg-card',
+                borderColor: selected ? 'hsl(var(--primary))' : 'hsl(var(--border))',
             }}
             onMouseEnter={() => setIsHovered(true)}
             onMouseLeave={() => setIsHovered(false)}
@@ -211,8 +208,8 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
             <Handle
                 type="target"
                 position={Position.Top}
-                className="!w-4 !h-4 !bg-white/90 !border-2 !border-white/60 transition-all duration-200 hover:!scale-125"
-                style={{ top: -8 }}
+                className="!w-3 !h-3 !bg-muted-foreground !border-2 !border-background"
+                style={{ top: -6 }}
             />
             
             {/* Node Content */}
@@ -220,9 +217,14 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
                 {/* Header */}
                 <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                        <span className="text-xl">{agentType.icon}</span>
+                        <div 
+                            className="w-8 h-8 rounded flex items-center justify-center text-lg"
+                            style={{ background: agentType.gradient, opacity: 0.9 }}
+                        >
+                            {agentType.icon}
+                        </div>
                         {data.status === 'active' && (
-                            <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_rgba(74,222,128,0.8)]" />
+                            <span className="w-2 h-2 bg-green-500 rounded-full" />
                         )}
                     </div>
                     {(isHovered || selected) && (
@@ -232,44 +234,44 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
                                     e.stopPropagation();
                                     data.onEdit?.(id);
                                 }}
-                                className="p-1 rounded bg-white/20 hover:bg-white/40 transition-colors"
+                                className="p-1 rounded bg-muted hover:bg-muted/80 transition-colors"
                                 title="Edit node"
                             >
-                                <Settings className="w-3 h-3 text-white" />
+                                <Settings className="w-3 h-3" />
                             </button>
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     data.onDelete?.(id);
                                 }}
-                                className="p-1 rounded bg-white/20 hover:bg-red-500/60 transition-colors"
+                                className="p-1 rounded bg-muted hover:bg-destructive/20 transition-colors"
                                 title="Delete node"
                             >
-                                <Trash2 className="w-3 h-3 text-white" />
+                                <Trash2 className="w-3 h-3" />
                             </button>
                         </div>
                     )}
                 </div>
                 
                 {/* Title */}
-                <div className="text-sm font-bold text-white drop-shadow-md mb-1">
+                <div className="text-sm font-medium text-foreground mb-1">
                     {agentType.name}
                 </div>
                 
                 {/* Inputs Preview */}
-                <div className="text-[10px] text-white/80 bg-black/20 rounded-lg px-2 py-1.5 backdrop-blur-sm max-h-[60px] overflow-hidden">
+                <div className="text-[10px] text-muted-foreground bg-muted/50 rounded px-2 py-1.5 max-h-[60px] overflow-hidden">
                     {Object.keys(data.inputs).length > 0 ? (
                         <div className="space-y-0.5">
                             {Object.entries(data.inputs).slice(0, 3).map(([key, value]) => (
                                 <div key={key} className="flex items-center gap-1 truncate">
-                                    <span className="text-white/60">{key}:</span>
+                                    <span className="text-muted-foreground">{key}:</span>
                                     <span className="truncate font-mono">
                                         {typeof value === 'string' ? value.slice(0, 20) : JSON.stringify(value).slice(0, 20)}
                                     </span>
                                 </div>
                             ))}
                             {Object.keys(data.inputs).length > 3 && (
-                                <span className="text-white/40">+{Object.keys(data.inputs).length - 3} more</span>
+                                <span className="text-muted-foreground/60">+{Object.keys(data.inputs).length - 3} more</span>
                             )}
                         </div>
                     ) : (
@@ -282,8 +284,8 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
             <Handle
                 type="source"
                 position={Position.Bottom}
-                className="!w-4 !h-4 !bg-white/90 !border-2 !border-white/60 transition-all duration-200 hover:!scale-125"
-                style={{ bottom: -8 }}
+                className="!w-3 !h-3 !bg-muted-foreground !border-2 !border-background"
+                style={{ bottom: -6 }}
             />
         </div>
     );
@@ -304,13 +306,13 @@ function AgentToolbar() {
     };
 
     return (
-        <div className="w-64 bg-slate-900/95 border-r border-slate-700 flex flex-col">
-            <div className="p-4 border-b border-slate-700">
-                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+        <div className="w-64 bg-background border-r flex flex-col">
+            <div className="p-4 border-b">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
                     <Plus className="w-4 h-4" />
                     Agent Types
                 </h3>
-                <p className="text-xs text-slate-400 mt-1">Drag to add nodes</p>
+                <p className="text-xs text-muted-foreground mt-1">Drag to add nodes</p>
             </div>
             
             <ScrollArea className="flex-1 p-3">
@@ -320,23 +322,23 @@ function AgentToolbar() {
                             key={agent.id}
                             draggable
                             onDragStart={(e) => onDragStart(e, agent)}
-                            className="group p-3 rounded-lg border border-slate-700 bg-slate-800/50 hover:bg-slate-800 cursor-grab active:cursor-grabbing transition-all duration-200 hover:border-slate-500 hover:shadow-lg"
+                            className="group p-3 rounded-lg border bg-card hover:bg-accent cursor-grab active:cursor-grabbing transition-all hover:border-muted-foreground/30"
                         >
                             <div className="flex items-start gap-3">
                                 <div 
-                                    className="w-10 h-10 rounded-lg flex items-center justify-center text-xl shadow-lg"
-                                    style={{ background: agent.gradient }}
+                                    className="w-8 h-8 rounded flex items-center justify-center text-lg"
+                                    style={{ background: agent.gradient, opacity: 0.8 }}
                                 >
                                     {agent.icon}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-1.5">
-                                        <GripVertical className="w-3 h-3 text-slate-500" />
-                                        <span className="font-medium text-sm text-white truncate">
+                                        <GripVertical className="w-3 h-3 text-muted-foreground" />
+                                        <span className="font-medium text-sm truncate">
                                             {agent.name}
                                         </span>
                                     </div>
-                                    <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                                         {agent.description}
                                     </p>
                                 </div>
@@ -383,9 +385,9 @@ function NodePropertiesPanel({
     // If no node is selected, show empty state
     if (!node || !agentType) {
         return (
-            <div className="w-80 bg-slate-900/95 border-l border-slate-700 flex flex-col">
+            <div className="w-80 bg-background border-l flex flex-col">
                 <div className="flex-1 flex items-center justify-center p-6 text-center">
-                    <div className="text-slate-500">
+                    <div className="text-muted-foreground">
                         <MousePointer2 className="w-12 h-12 mx-auto mb-3 opacity-50" />
                         <p className="text-sm">Select a node to edit its properties</p>
                     </div>
@@ -395,18 +397,18 @@ function NodePropertiesPanel({
     }
 
     return (
-        <div className="w-80 bg-slate-900/95 border-l border-slate-700 flex flex-col">
-            <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+        <div className="w-80 bg-background border-l flex flex-col">
+            <div className="p-4 border-b flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <div 
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-lg"
-                        style={{ background: agentType.gradient }}
+                        className="w-8 h-8 rounded flex items-center justify-center text-lg"
+                        style={{ background: agentType.gradient, opacity: 0.8 }}
                     >
                         {agentType.icon}
                     </div>
                     <div>
-                        <h3 className="text-sm font-semibold text-white">{agentType.name}</h3>
-                        <p className="text-xs text-slate-400">Node Properties</p>
+                        <h3 className="text-sm font-semibold">{agentType.name}</h3>
+                        <p className="text-xs text-muted-foreground">Node Properties</p>
                     </div>
                 </div>
                 <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8">
@@ -418,25 +420,25 @@ function NodePropertiesPanel({
                 <div className="space-y-4">
                     {/* Node ID */}
                     <div>
-                        <Label className="text-xs text-slate-400">Node ID</Label>
+                        <Label className="text-xs text-muted-foreground">Node ID</Label>
                         <Input 
                             value={node.id} 
                             disabled 
-                            className="mt-1.5 bg-slate-800 border-slate-700 text-slate-400 text-xs"
+                            className="mt-1.5 bg-muted text-muted-foreground text-xs"
                         />
                     </div>
 
-                    <Separator className="bg-slate-700" />
+                    <Separator />
 
                     {/* Quick Inputs from Agent Template */}
                     <div>
-                        <Label className="text-xs text-slate-400 mb-2 block">Quick Add Inputs</Label>
+                        <Label className="text-xs text-muted-foreground mb-2 block">Quick Add Inputs</Label>
                         <div className="flex flex-wrap gap-2">
                             {agentType.inputs.map((input) => (
                                 <button
                                     key={input.name}
                                     onClick={() => handleInputChange(input.name, input.type === 'string' ? '' : input.type === 'number' ? 0 : input.type === 'array' ? [] : {})}
-                                    className="px-2 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors"
+                                    className="px-2 py-1 text-xs rounded bg-muted hover:bg-muted/80 border transition-colors"
                                 >
                                     + {input.name}
                                 </button>
@@ -444,12 +446,12 @@ function NodePropertiesPanel({
                         </div>
                     </div>
 
-                    <Separator className="bg-slate-700" />
+                    <Separator />
 
                     {/* Current Inputs */}
                     <div>
                         <div className="flex items-center justify-between mb-2">
-                            <Label className="text-xs text-slate-400">Configured Inputs</Label>
+                            <Label className="text-xs text-muted-foreground">Configured Inputs</Label>
                             <Badge variant="outline" className="text-[10px]">
                                 {Object.keys(inputs).length}
                             </Badge>
@@ -457,14 +459,14 @@ function NodePropertiesPanel({
                         
                         <div className="space-y-2">
                             {Object.entries(inputs).map(([key, value]) => (
-                                <div key={key} className="p-2 rounded-lg bg-slate-800/50 border border-slate-700 group">
+                                <div key={key} className="p-2 rounded-lg bg-muted/50 border group">
                                     <div className="flex items-center justify-between mb-1.5">
-                                        <Label className="text-xs text-white font-medium">{key}</Label>
+                                        <Label className="text-xs font-medium">{key}</Label>
                                         <button
                                             onClick={() => handleRemoveInput(key)}
-                                            className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 transition-all"
+                                            className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/20 transition-all"
                                         >
-                                            <X className="w-3 h-3 text-red-400" />
+                                            <X className="w-3 h-3" />
                                         </button>
                                     </div>
                                     <Textarea
@@ -472,7 +474,6 @@ function NodePropertiesPanel({
                                         onChange={(e) => {
                                             const newValue = e.target.value;
                                             try {
-                                                // Try to parse as JSON if it looks like an object/array
                                                 if (newValue.trim().startsWith('{') || newValue.trim().startsWith('[')) {
                                                     handleInputChange(key, JSON.parse(newValue));
                                                 } else if (!isNaN(Number(newValue)) && newValue !== '') {
@@ -484,24 +485,24 @@ function NodePropertiesPanel({
                                                 handleInputChange(key, newValue);
                                             }
                                         }}
-                                        className="min-h-[60px] text-xs bg-slate-900 border-slate-600 font-mono"
+                                        className="min-h-[60px] text-xs bg-background border font-mono"
                                     />
                                 </div>
                             ))}
                             
                             {Object.keys(inputs).length === 0 && (
-                                <div className="text-center py-4 text-slate-500 text-xs">
+                                <div className="text-center py-4 text-muted-foreground text-xs">
                                     No inputs configured yet
                                 </div>
                             )}
                         </div>
                     </div>
 
-                    <Separator className="bg-slate-700" />
+                    <Separator />
 
                     {/* Add Custom Input */}
                     <div>
-                        <Label className="text-xs text-slate-400 mb-2 block">Add Custom Input</Label>
+                        <Label className="text-xs text-muted-foreground mb-2 block">Add Custom Input</Label>
                         <form 
                             onSubmit={(e) => {
                                 e.preventDefault();
@@ -517,7 +518,7 @@ function NodePropertiesPanel({
                             <Input 
                                 name="key"
                                 placeholder="input_name"
-                                className="flex-1 bg-slate-800 border-slate-700 text-xs"
+                                className="flex-1 bg-muted text-xs"
                             />
                             <Button type="submit" size="sm" variant="secondary">
                                 <Plus className="w-4 h-4" />
@@ -966,4 +967,4 @@ export function WorkflowBuilder({
 }
 
 export { AGENT_TYPES };
-export type { AgentType, AgentNodeData };
+export type { AgentType, AgentNodeData, WorkflowDAG };
