@@ -854,11 +854,21 @@ User text:
     if chart_type in ("pie",):
         if not labels_str or not values_num or len(labels_str) != len(values_num):
             topic = payload.get("title") or payload.get("text") or "Categories"
-            # simple 5-slice pie
-            labels_str = ["A", "B", "C", "D", "E"]
+            # Create descriptive labels based on topic
             seed = sum(ord(c) for c in str(topic)) % 10_000
             random.seed(seed)
-            raw = [random.uniform(1, 10) for _ in labels_str]
+            
+            # Generate meaningful category labels
+            common_categories = [
+                ["Category A", "Category B", "Category C", "Category D", "Category E"],
+                ["Segment 1", "Segment 2", "Segment 3", "Segment 4", "Segment 5"],
+                ["Group A", "Group B", "Group C", "Group D", "Other"],
+                ["High", "Medium-High", "Medium", "Medium-Low", "Low"],
+                ["Type I", "Type II", "Type III", "Type IV", "Type V"],
+            ]
+            labels_str = random.choice(common_categories)
+            
+            raw = [random.uniform(15, 45) for _ in labels_str]
             total = sum(raw)
             values_num = [round(v / total * 100, 1) for v in raw]
             x_label = x_label or ""
@@ -890,33 +900,49 @@ User text:
     if not role:
         raise ValueError("Chart artifact role must be specified")
 
-    plt.figure(figsize=(6, 4))
+    plt.figure(figsize=(8, 5))
 
     if chart_type == "bar":
-        plt.bar([str(v) for v in x_num], y_num)
+        bars = plt.bar([str(v) for v in x_num], y_num, color='steelblue', edgecolor='navy', alpha=0.8)
+        # Add value labels on top of bars
+        for bar in bars:
+            height = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}',
+                    ha='center', va='bottom', fontsize=9)
     elif chart_type == "line":
-        plt.plot(x_num, y_num)
+        plt.plot(x_num, y_num, marker='o', color='steelblue', linewidth=2, markersize=6)
     elif chart_type == "scatter":
-        plt.scatter(x_num, y_num)
+        plt.scatter(x_num, y_num, color='steelblue', alpha=0.6, s=50)
     elif chart_type == "area":
-        plt.fill_between(x_num, y_num, alpha=0.35)
-        plt.plot(x_num, y_num)
+        plt.fill_between(x_num, y_num, alpha=0.35, color='steelblue')
+        plt.plot(x_num, y_num, color='navy', linewidth=1.5)
     elif chart_type == "pie":
-        plt.pie(values_num, labels=labels_str, autopct="%1.1f%%")
+        colors = plt.cm.Set3(range(len(values_num)))
+        wedges, texts, autotexts = plt.pie(values_num, labels=labels_str, autopct="%1.1f%%", 
+                                          colors=colors, startangle=90)
+        # Make percentage text bold
+        for autotext in autotexts:
+            autotext.set_fontweight('bold')
+            autotext.set_fontsize(10)
+        plt.axis('equal')
     elif chart_type == "histogram":
         bins = payload.get("bins")
         try:
             bins_i = int(bins) if bins is not None else 10
         except Exception:
             bins_i = 10
-        plt.hist(values_num, bins=bins_i)
+        plt.hist(values_num, bins=bins_i, color='steelblue', edgecolor='navy', alpha=0.7)
+        plt.xlabel("Value Range")
+        plt.ylabel("Frequency")
     else:
         raise ValueError(f"Unsupported chart type: {chart_type}")
 
-    plt.title(title)
+    plt.title(title, fontsize=14, fontweight='bold', pad=15)
     if chart_type not in ("pie",):
-        plt.xlabel(x_label)
-        plt.ylabel(y_label)
+        plt.xlabel(x_label, fontsize=11)
+        plt.ylabel(y_label, fontsize=11)
+        plt.grid(True, alpha=0.3, linestyle='--')
     plt.tight_layout()
 
     buf = io.BytesIO()
@@ -1057,23 +1083,18 @@ Text:
 
             # Add AI-powered insights
             try:
-                ai_prompt = f"""Analyze this statistical data and provide insights:
+                ai_prompt = f"""Analyze this statistical data and provide concise insights:
 
-Data: {data[:50]}  # First 50 points
-Statistics:
-- Count: {stats['count']}
-- Mean: {stats['mean']}
-- Median: {stats['median']}
-- Min: {stats['min']}
-- Max: {stats['max']}
+Data: {data[:30]}
+Statistics: count={stats['count']}, mean={stats['mean']:.2f}, median={stats['median']:.2f}, range={stats['min']:.1f}-{stats['max']:.1f}
 
-Provide 2-3 key insights about this data in plain language."""
+Provide 2-3 short, actionable insights (1 sentence each). Be specific and quantitative where possible."""
 
                 insights = ai_helper.generate_ai_response(
                     ai_prompt,
                     task_type="analyzer",
-                    temperature=0.5,
-                    max_tokens=200,
+                    temperature=0.4,
+                    max_tokens=150,
                 )
                 log_task(task_id, "INFO", "AI insights generated")
             except Exception as e:
