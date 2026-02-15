@@ -110,10 +110,13 @@ async function createAndTrackJob(jobPayload: {
   // Step 4: Quality assessment
   console.log('\n[4/4] Quality Assessment...');
 
-  const taskStatuses = tasks.map((t: { status: string; name: string }) => ({
-    name: t.name,
-    status: t.status
-  }));
+  type TaskLike = { name?: unknown; status?: unknown };
+  const taskStatuses = tasks
+    .map((t) => t as TaskLike)
+    .map((t) => ({
+      name: typeof t.name === 'string' ? t.name : '(unknown)',
+      status: typeof t.status === 'string' ? t.status : '(unknown)',
+    }));
 
   console.log('\n   Task Statuses:');
   taskStatuses.forEach((t: { name: string; status: string }) => {
@@ -126,7 +129,11 @@ async function createAndTrackJob(jobPayload: {
     console.log(`     📦 ${a.filename || 'unnamed'} (${a.type || 'unknown'}, ${a.size || 0} bytes)`);
   });
 
-  const success = finalStatus === 'SUCCESS' && tasks.every((t: { status: string }) => t.status === 'SUCCESS');
+  const success =
+    finalStatus === 'SUCCESS' &&
+    tasks
+      .map((t) => t as TaskLike)
+      .every((t) => (typeof t.status === 'string' ? t.status === 'SUCCESS' : false));
   console.log(`\n🎯 Result: ${success ? '✅ ALL TASKS SUCCEEDED' : '❌ SOME TASKS FAILED'}`);
 
   return {

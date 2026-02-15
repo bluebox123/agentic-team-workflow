@@ -142,7 +142,9 @@ export const AGENT_REGISTRY: AgentCapability[] = [
         inputs: [
             { name: "message", type: "string", description: "Message to send", required: true },
             { name: "channel", type: "string", description: "Channel: 'email', 'slack', 'sms'", required: true },
-            { name: "recipient", type: "string", description: "Recipient address/number", required: true },
+            { name: "recipients", type: "array", description: "Recipients (email addresses)", required: false },
+            { name: "recipient", type: "string", description: "Recipient address/number (legacy)", required: false },
+            { name: "subject", type: "string", description: "Email subject", required: false },
         ],
         outputs: [
             { name: "status", type: "string", description: "Delivery status" },

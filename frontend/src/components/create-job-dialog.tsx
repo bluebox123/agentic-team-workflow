@@ -92,7 +92,7 @@ const availableTasks: { type: TaskType; label: string; icon: ElementType; defaul
     { type: "summarizer", label: "Summarizer Agent", icon: FileText, defaultPayload: { text: "", max_sentences: 3 } },
     { type: "validator", label: "Validator Agent", icon: Shield, defaultPayload: { data: {}, rules: {} } },
     { type: "transformer", label: "Transformer Agent", icon: ArrowLeftRight, defaultPayload: { data: [], transform: "uppercase" } },
-    { type: "notifier", label: "Notifier Agent", icon: Bell, defaultPayload: { channel: "email", recipients: [], message: "" } },
+    { type: "notifier", label: "Notifier Agent", icon: Bell, defaultPayload: { channel: "email", recipients: [], subject: "", message: "" } },
     { type: "scraper", label: "Scraper Agent", icon: Globe, defaultPayload: { url: "", selector: "" } },
 ];
 
@@ -534,6 +534,53 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                                                         placeholder="e.g. Check for grammar and tone..."
                                                                         className="bg-muted/30"
                                                                     />
+                                                                </div>
+                                                            )}
+                                                            {task.type === 'notifier' && (
+                                                                <div className="space-y-3">
+                                                                    <div className="space-y-1.5">
+                                                                        <Label className="text-xs text-muted-foreground">Channel</Label>
+                                                                        <Input
+                                                                            value={task.payload?.channel as string || "email"}
+                                                                            onChange={(e) => updateTask(index, "payload", e.target.value, "channel")}
+                                                                            placeholder="email"
+                                                                            className="bg-muted/30"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="space-y-1.5">
+                                                                        <Label className="text-xs text-muted-foreground">Recipients (comma-separated)</Label>
+                                                                        <Input
+                                                                            value={Array.isArray(task.payload?.recipients) ? (task.payload?.recipients as string[]).join(", ") : (task.payload?.recipients as string || "")}
+                                                                            onChange={(e) => {
+                                                                                const raw = e.target.value;
+                                                                                const parsed = raw
+                                                                                    .split(",")
+                                                                                    .map(s => s.trim())
+                                                                                    .filter(Boolean);
+                                                                                updateTask(index, "payload", parsed, "recipients");
+                                                                            }}
+                                                                            placeholder="samarthsaxena53@gmail.com"
+                                                                            className="bg-muted/30"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="space-y-1.5">
+                                                                        <Label className="text-xs text-muted-foreground">Subject</Label>
+                                                                        <Input
+                                                                            value={task.payload?.subject as string || ""}
+                                                                            onChange={(e) => updateTask(index, "payload", e.target.value, "subject")}
+                                                                            placeholder="Your report is ready"
+                                                                            className="bg-muted/30"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="space-y-1.5">
+                                                                        <Label className="text-xs text-muted-foreground">Message</Label>
+                                                                        <Input
+                                                                            value={task.payload?.message as string || ""}
+                                                                            onChange={(e) => updateTask(index, "payload", e.target.value, "message")}
+                                                                            placeholder="Write the email message..."
+                                                                            className="bg-muted/30"
+                                                                        />
+                                                                    </div>
                                                                 </div>
                                                             )}
                                                         </div>

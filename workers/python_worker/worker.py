@@ -5,6 +5,8 @@ import psycopg2
 import pika
 import sys
 import requests
+import smtplib
+from email.mime.text import MIMEText
 from dotenv import load_dotenv
 from prometheus_client import Counter, start_http_server
 import boto3
@@ -43,6 +45,10 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "artifacts")
 MINIO_USE_SSL = os.getenv("MINIO_USE_SSL", "true").lower() == "true"
 MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")
+
+# Gmail SMTP Configuration (Notifier agent)
+GMAIL_USER = os.getenv("GMAIL_USER")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 
 # Build endpoint URL
 protocol = "https" if MINIO_USE_SSL else "http"
@@ -1368,22 +1374,101 @@ Provide the transformed data as a JSON array."""
 
 
 def run_notifier(task_id, job_id, payload):
-    """Simulate sending notifications"""
+    """Send notifications (email) via Gmail SMTP."""
     channel = payload.get("channel", "email")
-    recipients = payload.get("recipients", [])
+    recipients = payload.get("recipients")
+    if recipients is None:
+        recipients = payload.get("sent_to")
+    if recipients is None:
+        single = payload.get("recipient")
+        recipients = [single] if single is not None else []
+    subject = payload.get("subject", "Notification from workflow")
     message = payload.get("message", "Notification from workflow")
-    
-    # Simulate notification delivery
-    sent_count = len(recipients) if recipients else 0
-    
+
+    if channel != "email":
+        log_task(task_id, "WARN", f"Notifier channel '{channel}' not supported; only 'email' is implemented")
+
+    if not isinstance(recipients, list):
+        log_task(task_id, "WARN", "Notifier recipients must be a list; coercing to empty list")
+        recipients = []
+
+    smtp_host = "smtp.gmail.com"
+    smtp_port = 587
+
+    results = []
+    sent_count = 0
+    error_count = 0
+    status = "sent"
+
+    if not recipients:
+        log_task(task_id, "WARN", "Notifier called with empty recipients list")
+        status = "no_recipients"
+    elif not GMAIL_USER or not GMAIL_APP_PASSWORD:
+        log_task(task_id, "ERROR", "Missing Gmail credentials: set GMAIL_USER and GMAIL_APP_PASSWORD")
+        status = "missing_credentials"
+        error_count = len(recipients)
+        results = [{"to": r, "ok": False, "error": "missing_credentials"} for r in recipients]
+    else:
+        server = None
+        try:
+            log_task(task_id, "INFO", f"Connecting to Gmail SMTP {smtp_host}:{smtp_port} (TLS)")
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=20)
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+            log_task(task_id, "INFO", "Authenticated with Gmail SMTP")
+
+            for recipient in recipients:
+                if not isinstance(recipient, str) or not recipient.strip():
+                    error_count += 1
+                    results.append({"to": recipient, "ok": False, "error": "invalid_recipient"})
+                    continue
+
+                msg = MIMEText(message, _charset="utf-8")
+                msg["Subject"] = subject
+                msg["From"] = GMAIL_USER
+                msg["To"] = recipient
+
+                try:
+                    server.sendmail(GMAIL_USER, [recipient], msg.as_string())
+                    sent_count += 1
+                    results.append({"to": recipient, "ok": True})
+                except Exception as e:
+                    error_count += 1
+                    results.append({"to": recipient, "ok": False, "error": str(e)})
+                    log_task(task_id, "ERROR", f"Failed sending email to {recipient}: {e}")
+
+        except Exception as e:
+            status = "smtp_error"
+            error_count = len(recipients)
+            results = [{"to": r, "ok": False, "error": f"smtp_error: {e}"} for r in recipients]
+            log_task(task_id, "ERROR", f"Notifier SMTP error: {e}")
+        finally:
+            try:
+                if server is not None:
+                    server.quit()
+            except Exception:
+                pass
+
+    if error_count > 0 and sent_count == 0 and status == "sent":
+        status = "failed"
+    elif error_count > 0 and sent_count > 0 and status == "sent":
+        status = "partial"
+
     content = json.dumps({
         "channel": channel,
+        "smtp": {"host": smtp_host, "port": smtp_port, "tls": True},
+        "from": GMAIL_USER,
+        "subject": subject,
         "sent_to": recipients,
         "message_preview": message[:100],
-        "status": "sent",
-        "sent_count": sent_count
+        "status": status,
+        "sent_count": sent_count,
+        "error_count": error_count,
+        "results": results
     }).encode("utf-8")
-    
+
     object_key = f"jobs/{job_id}/{task_id}_notification.json"
     s3_client.put_object(
         Bucket=MINIO_BUCKET,
@@ -1391,17 +1476,43 @@ def run_notifier(task_id, job_id, payload):
         Body=io.BytesIO(content),
         ContentType="application/json"
     )
-    
+
+    # If we could not send anything for email channel, fail the task so it shows up clearly in UI/logs.
+    should_fail = channel == "email" and status in {"no_recipients", "missing_credentials", "smtp_error", "failed"}
+
+    if should_fail:
+        try:
+            requests.post(
+                f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/fail",
+                json={
+                    "error": f"notifier_failed: status={status} sent={sent_count} failed={error_count}",
+                    "artifact": {"type": "json", "filename": "notification.json", "storage_key": object_key},
+                },
+                timeout=5,
+            )
+        except Exception as e:
+            log_task(task_id, "ERROR", f"Failed to report notifier failure to orchestrator: {e}")
+        worker_tasks_total.labels(result="failed").inc()
+        log_task(task_id, "ERROR", f"Notification FAILED status={status} via {channel}: sent={sent_count} failed={error_count}")
+        return
+
     requests.post(
         f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
         json={
-            "result": {"ok": True, "job_id": job_id, "executor": "notifier", "notifications_sent": sent_count},
+            "result": {
+                "ok": True,
+                "job_id": job_id,
+                "executor": "notifier",
+                "notifications_sent": sent_count,
+                "notifications_failed": error_count,
+                "status": status,
+            },
             "artifact": {"type": "json", "filename": "notification.json", "storage_key": object_key}
         },
         timeout=5,
     )
     worker_tasks_total.labels(result="success").inc()
-    log_task(task_id, "INFO", f"Notification sent via {channel} to {sent_count} recipients")
+    log_task(task_id, "INFO", f"Notification status={status} via {channel}: sent={sent_count} failed={error_count}")
 
 
 def run_scraper(task_id, job_id, payload):

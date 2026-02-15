@@ -178,6 +178,8 @@ const AGENT_TYPES: AgentType[] = [
         inputs: [
             { name: 'message', type: 'string', required: true, description: 'Message to send' },
             { name: 'channel', type: 'string', required: true, description: 'Notification channel' }
+            ,{ name: 'recipients', type: 'array', required: true, description: 'Recipients (email addresses)' }
+            ,{ name: 'subject', type: 'string', required: false, description: 'Email subject' }
         ]
     }
 ];
