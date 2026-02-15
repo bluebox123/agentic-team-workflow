@@ -6,6 +6,8 @@ import pika
 import sys
 import requests
 import smtplib
+import socket
+import ssl
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
 from prometheus_client import Counter, start_http_server
@@ -1394,6 +1396,7 @@ def run_notifier(task_id, job_id, payload):
 
     smtp_host = "smtp.gmail.com"
     smtp_port = 587
+    smtp_ssl_port = 465
 
     results = []
     sent_count = 0
@@ -1411,11 +1414,34 @@ def run_notifier(task_id, job_id, payload):
     else:
         server = None
         try:
-            log_task(task_id, "INFO", f"Connecting to Gmail SMTP {smtp_host}:{smtp_port} (TLS)")
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=20)
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
+            def resolve_ipv4(host: str) -> str:
+                infos = socket.getaddrinfo(host, None, family=socket.AF_INET, type=socket.SOCK_STREAM)
+                if not infos:
+                    raise RuntimeError(f"No IPv4 address found for {host}")
+                return infos[0][4][0]
+
+            def connect_starttls() -> smtplib.SMTP:
+                ip = resolve_ipv4(smtp_host)
+                log_task(task_id, "INFO", f"Connecting to Gmail SMTP {smtp_host}:{smtp_port} via IPv4 {ip} (STARTTLS)")
+                s = smtplib.SMTP(ip, smtp_port, timeout=20)
+                s.ehlo()
+                s.starttls(context=ssl.create_default_context())
+                s.ehlo()
+                return s
+
+            def connect_ssl() -> smtplib.SMTP:
+                ip = resolve_ipv4(smtp_host)
+                log_task(task_id, "INFO", f"Connecting to Gmail SMTP {smtp_host}:{smtp_ssl_port} via IPv4 {ip} (SSL)")
+                s = smtplib.SMTP_SSL(ip, smtp_ssl_port, timeout=20, context=ssl.create_default_context())
+                s.ehlo()
+                return s
+
+            try:
+                server = connect_starttls()
+            except Exception as e:
+                log_task(task_id, "WARN", f"STARTTLS connection failed, trying SSL fallback: {e}")
+                server = connect_ssl()
+
             server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
             log_task(task_id, "INFO", "Authenticated with Gmail SMTP")
 
