@@ -1571,21 +1571,19 @@ def run_notifier(task_id, job_id, payload):
                 elif smtp_result["status"] == "partial":
                     status = "partial"
                     email_provider_used = "gmail_smtp"
-                elif EMAIL_PROVIDER == "smtp":
-                    # SMTP explicitly chosen but failed
-                    status = smtp_result["status"]
-                # If auto mode and SMTP failed with network error, we'll try HTTP fallback
-                if EMAIL_PROVIDER == "auto" and smtp_result["status"] in ("smtp_error", "failed"):
-                    log_task(task_id, "INFO", "SMTP failed, will try HTTP fallback")
                 else:
-                    # Either success or non-network error - don't fallback
-                    pass
+                    # SMTP failed. In auto mode we want to fall back to HTTP; in smtp mode we fail.
+                    status = smtp_result["status"]
+                    if EMAIL_PROVIDER == "auto":
+                        log_task(task_id, "INFO", "SMTP failed, will try HTTP fallback")
             else:
                 log_task(task_id, "WARN", "Gmail credentials not set, skipping SMTP")
+                status = "missing_credentials"
                 if EMAIL_PROVIDER == "smtp":
-                    status = "missing_credentials"
                     error_count = len(recipients)
                     results = [{"to": r, "ok": False, "error": "missing_credentials"} for r in recipients]
+                elif EMAIL_PROVIDER == "auto":
+                    log_task(task_id, "INFO", "SMTP credentials missing, will try HTTP fallback")
 
         # Try HTTP fallback if auto mode and SMTP didn't fully succeed
         if EMAIL_PROVIDER == "auto" and status not in ("sent", "partial") and SENDGRID_API_KEY:
@@ -1597,6 +1595,10 @@ def run_notifier(task_id, job_id, payload):
             error_count = http_result["error_count"]
             status = http_result["status"]
             email_provider_used = "sendgrid_http"
+        elif EMAIL_PROVIDER == "auto" and status not in ("sent", "partial") and not SENDGRID_API_KEY:
+            log_task(task_id, "ERROR", "SMTP failed and SENDGRID_API_KEY is not set; cannot use HTTP fallback")
+            if status == "sent":
+                status = "missing_credentials"
 
         # HTTP-only mode
         elif EMAIL_PROVIDER == "http":
