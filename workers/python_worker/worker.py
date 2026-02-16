@@ -9,6 +9,11 @@ import smtplib
 import socket
 import ssl
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+import base64
+from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 from prometheus_client import Counter, start_http_server
 import boto3
@@ -1382,7 +1387,58 @@ Provide the transformed data as a JSON array."""
     log_task(task_id, "INFO", f"Transform completed: {transform_type}")
 
 
-def _send_via_smtp(task_id: str, recipients: list, subject: str, message: str) -> dict:
+def _get_latest_job_pdf_attachment(task_id: str, job_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not job_id:
+        return None
+
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT a.storage_key, a.filename, a.role
+                FROM artifacts a
+                JOIN tasks t ON a.task_id = t.id
+                WHERE t.job_id = %s AND a.type = 'pdf'
+                ORDER BY (a.role = 'report') DESC, a.created_at DESC
+                LIMIT 1
+                """,
+                (job_id,),
+            )
+            row = cur.fetchone()
+
+        if not row:
+            return None
+
+        storage_key, filename, role = row
+        if not storage_key:
+            return None
+
+        try:
+            resp = s3_client.get_object(Bucket=MINIO_BUCKET, Key=storage_key)
+            content_bytes = resp["Body"].read()
+        except Exception as e:
+            log_task(task_id, "ERROR", f"Failed to download PDF attachment from storage key '{storage_key}': {e}")
+            return None
+
+        return {
+            "storage_key": storage_key,
+            "filename": filename or "report.pdf",
+            "role": role,
+            "content_bytes": content_bytes,
+        }
+
+    except Exception as e:
+        log_task(task_id, "ERROR", f"Failed to resolve PDF attachment for job {job_id}: {e}")
+        return None
+
+
+def _send_via_smtp(
+    task_id: str,
+    recipients: list,
+    subject: str,
+    message: str,
+    attachment: Optional[Dict[str, Any]],
+) -> dict:
     """Send email via Gmail SMTP with IPv4 forcing and SSL fallback."""
     smtp_host = "smtp.gmail.com"
     smtp_port = 587
@@ -1431,10 +1487,21 @@ def _send_via_smtp(task_id: str, recipients: list, subject: str, message: str) -
                 results.append({"to": recipient, "ok": False, "error": "invalid_recipient"})
                 continue
 
-            msg = MIMEText(message, _charset="utf-8")
+            msg = MIMEMultipart()
             msg["Subject"] = subject
             msg["From"] = GMAIL_USER
             msg["To"] = recipient
+            msg.attach(MIMEText(message, _charset="utf-8"))
+
+            if attachment is not None:
+                part = MIMEBase("application", "pdf")
+                part.set_payload(attachment["content_bytes"])
+                encoders.encode_base64(part)
+                part.add_header(
+                    "Content-Disposition",
+                    f"attachment; filename=\"{attachment['filename']}\"",
+                )
+                msg.attach(part)
 
             try:
                 server.sendmail(GMAIL_USER, [recipient], msg.as_string())
@@ -1465,7 +1532,13 @@ def _send_via_smtp(task_id: str, recipients: list, subject: str, message: str) -
     return {"status": status, "sent_count": sent_count, "error_count": error_count, "results": results}
 
 
-def _send_via_sendgrid(task_id: str, recipients: list, subject: str, message: str) -> dict:
+def _send_via_sendgrid(
+    task_id: str,
+    recipients: list,
+    subject: str,
+    message: str,
+    attachment: Optional[Dict[str, Any]],
+) -> dict:
     """Send email via SendGrid HTTP API (for Railway where SMTP is blocked)."""
     results = []
     sent_count = 0
@@ -1496,6 +1569,16 @@ def _send_via_sendgrid(task_id: str, recipients: list, subject: str, message: st
             "subject": subject,
             "content": [{"type": "text/plain", "value": message}]
         }
+
+        if attachment is not None:
+            data["attachments"] = [
+                {
+                    "content": base64.b64encode(attachment["content_bytes"]).decode("utf-8"),
+                    "type": "application/pdf",
+                    "filename": attachment["filename"],
+                    "disposition": "attachment",
+                }
+            ]
 
         log_task(task_id, "INFO", f"Sending via SendGrid API to {len(recipients)} recipients from {from_email}")
         resp = requests.post(url, headers=headers, json=data, timeout=30)
@@ -1557,11 +1640,13 @@ def run_notifier(task_id, job_id, payload):
         log_task(task_id, "WARN", "Notifier called with empty recipients list")
         status = "no_recipients"
     else:
+        resolved_attachment = _get_latest_job_pdf_attachment(task_id, job_id=job_id)
+
         # Try SMTP first if auto or smtp mode
         if EMAIL_PROVIDER in ("auto", "smtp"):
             if GMAIL_USER and GMAIL_APP_PASSWORD:
                 log_task(task_id, "INFO", f"Attempting SMTP delivery via {GMAIL_USER}")
-                smtp_result = _send_via_smtp(task_id, recipients, subject, message)
+                smtp_result = _send_via_smtp(task_id, recipients, subject, message, resolved_attachment)
                 results.extend(smtp_result["results"])
                 sent_count += smtp_result["sent_count"]
                 error_count += smtp_result["error_count"]
@@ -1588,7 +1673,7 @@ def run_notifier(task_id, job_id, payload):
         # Try HTTP fallback if auto mode and SMTP didn't fully succeed
         if EMAIL_PROVIDER == "auto" and status not in ("sent", "partial") and SENDGRID_API_KEY:
             log_task(task_id, "INFO", "Attempting HTTP delivery via SendGrid")
-            http_result = _send_via_sendgrid(task_id, recipients, subject, message)
+            http_result = _send_via_sendgrid(task_id, recipients, subject, message, resolved_attachment)
             # Merge results - HTTP sends to all recipients in one call
             results = http_result["results"]
             sent_count = http_result["sent_count"]
@@ -1604,7 +1689,7 @@ def run_notifier(task_id, job_id, payload):
         elif EMAIL_PROVIDER == "http":
             if SENDGRID_API_KEY:
                 log_task(task_id, "INFO", "Attempting HTTP delivery via SendGrid (HTTP mode)")
-                http_result = _send_via_sendgrid(task_id, recipients, subject, message)
+                http_result = _send_via_sendgrid(task_id, recipients, subject, message, resolved_attachment)
                 results = http_result["results"]
                 sent_count = http_result["sent_count"]
                 error_count = http_result["error_count"]
@@ -1623,6 +1708,17 @@ def run_notifier(task_id, job_id, payload):
         status = "partial"
 
     # Build artifact content
+    attachment_meta = None
+    try:
+        attachment = _get_latest_job_pdf_attachment(task_id, job_id=job_id)
+        if attachment is not None:
+            attachment_meta = {
+                "filename": attachment["filename"],
+                "bytes": len(attachment["content_bytes"]),
+            }
+    except Exception:
+        attachment_meta = None
+
     content = json.dumps({
         "channel": channel,
         "provider": email_provider_used,
@@ -1630,6 +1726,7 @@ def run_notifier(task_id, job_id, payload):
         "subject": subject,
         "sent_to": recipients,
         "message_preview": message[:100],
+        "attachment": attachment_meta,
         "status": status,
         "sent_count": sent_count,
         "error_count": error_count,
