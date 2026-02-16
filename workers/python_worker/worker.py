@@ -52,6 +52,13 @@ MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 
+# SendGrid Configuration (HTTP fallback for Railway/cloud)
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
+SENDGRID_FROM_EMAIL = os.getenv("SENDGRID_FROM_EMAIL") or GMAIL_USER  # Fallback to Gmail user if not set
+
+# Email provider preference: "auto" (try SMTP then HTTP), "smtp", "http"
+EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "auto")
+
 # Build endpoint URL
 protocol = "https" if MINIO_USE_SSL else "http"
 if MINIO_ENDPOINT.startswith("http"):
@@ -1375,8 +1382,154 @@ Provide the transformed data as a JSON array."""
     log_task(task_id, "INFO", f"Transform completed: {transform_type}")
 
 
+def _send_via_smtp(task_id: str, recipients: list, subject: str, message: str) -> dict:
+    """Send email via Gmail SMTP with IPv4 forcing and SSL fallback."""
+    smtp_host = "smtp.gmail.com"
+    smtp_port = 587
+    smtp_ssl_port = 465
+    results = []
+    sent_count = 0
+    error_count = 0
+    status = "sent"
+
+    server = None
+    try:
+        def resolve_ipv4(host: str) -> str:
+            infos = socket.getaddrinfo(host, None, family=socket.AF_INET, type=socket.SOCK_STREAM)
+            if not infos:
+                raise RuntimeError(f"No IPv4 address found for {host}")
+            return infos[0][4][0]
+
+        def connect_starttls():
+            ip = resolve_ipv4(smtp_host)
+            log_task(task_id, "INFO", f"Connecting to Gmail SMTP {smtp_host}:{smtp_port} via IPv4 {ip} (STARTTLS)")
+            s = smtplib.SMTP(ip, smtp_port, timeout=20)
+            s.ehlo()
+            s.starttls(context=ssl.create_default_context())
+            s.ehlo()
+            return s
+
+        def connect_ssl():
+            ip = resolve_ipv4(smtp_host)
+            log_task(task_id, "INFO", f"Connecting to Gmail SMTP {smtp_host}:{smtp_ssl_port} via IPv4 {ip} (SSL)")
+            s = smtplib.SMTP_SSL(ip, smtp_ssl_port, timeout=20, context=ssl.create_default_context())
+            s.ehlo()
+            return s
+
+        try:
+            server = connect_starttls()
+        except Exception as e:
+            log_task(task_id, "WARN", f"STARTTLS connection failed, trying SSL fallback: {e}")
+            server = connect_ssl()
+
+        server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+        log_task(task_id, "INFO", "Authenticated with Gmail SMTP")
+
+        for recipient in recipients:
+            if not isinstance(recipient, str) or not recipient.strip():
+                error_count += 1
+                results.append({"to": recipient, "ok": False, "error": "invalid_recipient"})
+                continue
+
+            msg = MIMEText(message, _charset="utf-8")
+            msg["Subject"] = subject
+            msg["From"] = GMAIL_USER
+            msg["To"] = recipient
+
+            try:
+                server.sendmail(GMAIL_USER, [recipient], msg.as_string())
+                sent_count += 1
+                results.append({"to": recipient, "ok": True})
+            except Exception as e:
+                error_count += 1
+                results.append({"to": recipient, "ok": False, "error": str(e)})
+                log_task(task_id, "ERROR", f"Failed sending email to {recipient}: {e}")
+
+    except Exception as e:
+        status = "smtp_error"
+        error_count = len(recipients)
+        results = [{"to": r, "ok": False, "error": f"smtp_error: {e}"} for r in recipients]
+        log_task(task_id, "ERROR", f"Notifier SMTP error: {e}")
+    finally:
+        try:
+            if server is not None:
+                server.quit()
+        except Exception:
+            pass
+
+    if error_count > 0 and sent_count == 0 and status == "sent":
+        status = "failed"
+    elif error_count > 0 and sent_count > 0 and status == "sent":
+        status = "partial"
+
+    return {"status": status, "sent_count": sent_count, "error_count": error_count, "results": results}
+
+
+def _send_via_sendgrid(task_id: str, recipients: list, subject: str, message: str) -> dict:
+    """Send email via SendGrid HTTP API (for Railway where SMTP is blocked)."""
+    results = []
+    sent_count = 0
+    error_count = 0
+    status = "sent"
+
+    try:
+        from_email = SENDGRID_FROM_EMAIL or GMAIL_USER
+        if not from_email:
+            raise ValueError("No from email configured")
+
+        # SendGrid v3 API endpoint
+        url = "https://api.sendgrid.com/v3/mail/send"
+        headers = {
+            "Authorization": f"Bearer {SENDGRID_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        # Build personalizations for each recipient
+        personalizations = [{"to": [{"email": r}]} for r in recipients if isinstance(r, str) and r.strip()]
+
+        if not personalizations:
+            return {"status": "no_recipients", "sent_count": 0, "error_count": len(recipients), "results": []}
+
+        data = {
+            "personalizations": personalizations,
+            "from": {"email": from_email},
+            "subject": subject,
+            "content": [{"type": "text/plain", "value": message}]
+        }
+
+        log_task(task_id, "INFO", f"Sending via SendGrid API to {len(recipients)} recipients from {from_email}")
+        resp = requests.post(url, headers=headers, json=data, timeout=30)
+
+        if resp.status_code in (200, 201, 202):
+            # SendGrid accepted the request
+            sent_count = len(recipients)
+            for r in recipients:
+                results.append({"to": r, "ok": True})
+            log_task(task_id, "INFO", f"SendGrid accepted email request (HTTP {resp.status_code})")
+        else:
+            error_msg = f"SendGrid API error: HTTP {resp.status_code} - {resp.text[:200]}"
+            log_task(task_id, "ERROR", error_msg)
+            error_count = len(recipients)
+            status = "sendgrid_error"
+            for r in recipients:
+                results.append({"to": r, "ok": False, "error": error_msg})
+
+    except Exception as e:
+        status = "sendgrid_error"
+        error_count = len(recipients)
+        results = [{"to": r, "ok": False, "error": f"sendgrid_error: {e}"} for r in recipients]
+        log_task(task_id, "ERROR", f"SendGrid delivery error: {e}")
+
+    if error_count > 0 and sent_count == 0 and status == "sent":
+        status = "failed"
+    elif error_count > 0 and sent_count > 0 and status == "sent":
+        status = "partial"
+
+    return {"status": status, "sent_count": sent_count, "error_count": error_count, "results": results}
+
+
 def run_notifier(task_id, job_id, payload):
-    """Send notifications (email) via Gmail SMTP."""
+    """Send notifications (email) via Gmail SMTP with SendGrid HTTP fallback for Railway."""
     channel = payload.get("channel", "email")
     recipients = payload.get("recipients")
     if recipients is None:
@@ -1394,98 +1547,84 @@ def run_notifier(task_id, job_id, payload):
         log_task(task_id, "WARN", "Notifier recipients must be a list; coercing to empty list")
         recipients = []
 
-    smtp_host = "smtp.gmail.com"
-    smtp_port = 587
-    smtp_ssl_port = 465
-
     results = []
     sent_count = 0
     error_count = 0
     status = "sent"
+    email_provider_used = None
 
     if not recipients:
         log_task(task_id, "WARN", "Notifier called with empty recipients list")
         status = "no_recipients"
-    elif not GMAIL_USER or not GMAIL_APP_PASSWORD:
-        log_task(task_id, "ERROR", "Missing Gmail credentials: set GMAIL_USER and GMAIL_APP_PASSWORD")
-        status = "missing_credentials"
-        error_count = len(recipients)
-        results = [{"to": r, "ok": False, "error": "missing_credentials"} for r in recipients]
     else:
-        server = None
-        try:
-            def resolve_ipv4(host: str) -> str:
-                infos = socket.getaddrinfo(host, None, family=socket.AF_INET, type=socket.SOCK_STREAM)
-                if not infos:
-                    raise RuntimeError(f"No IPv4 address found for {host}")
-                return infos[0][4][0]
+        # Try SMTP first if auto or smtp mode
+        if EMAIL_PROVIDER in ("auto", "smtp"):
+            if GMAIL_USER and GMAIL_APP_PASSWORD:
+                log_task(task_id, "INFO", f"Attempting SMTP delivery via {GMAIL_USER}")
+                smtp_result = _send_via_smtp(task_id, recipients, subject, message)
+                results.extend(smtp_result["results"])
+                sent_count += smtp_result["sent_count"]
+                error_count += smtp_result["error_count"]
+                if smtp_result["status"] == "sent":
+                    status = "sent"
+                    email_provider_used = "gmail_smtp"
+                elif smtp_result["status"] == "partial":
+                    status = "partial"
+                    email_provider_used = "gmail_smtp"
+                elif EMAIL_PROVIDER == "smtp":
+                    # SMTP explicitly chosen but failed
+                    status = smtp_result["status"]
+                # If auto mode and SMTP failed with network error, we'll try HTTP fallback
+                if EMAIL_PROVIDER == "auto" and smtp_result["status"] in ("smtp_error", "failed"):
+                    log_task(task_id, "INFO", "SMTP failed, will try HTTP fallback")
+                else:
+                    # Either success or non-network error - don't fallback
+                    pass
+            else:
+                log_task(task_id, "WARN", "Gmail credentials not set, skipping SMTP")
+                if EMAIL_PROVIDER == "smtp":
+                    status = "missing_credentials"
+                    error_count = len(recipients)
+                    results = [{"to": r, "ok": False, "error": "missing_credentials"} for r in recipients]
 
-            def connect_starttls() -> smtplib.SMTP:
-                ip = resolve_ipv4(smtp_host)
-                log_task(task_id, "INFO", f"Connecting to Gmail SMTP {smtp_host}:{smtp_port} via IPv4 {ip} (STARTTLS)")
-                s = smtplib.SMTP(ip, smtp_port, timeout=20)
-                s.ehlo()
-                s.starttls(context=ssl.create_default_context())
-                s.ehlo()
-                return s
+        # Try HTTP fallback if auto mode and SMTP didn't fully succeed
+        if EMAIL_PROVIDER == "auto" and status not in ("sent", "partial") and SENDGRID_API_KEY:
+            log_task(task_id, "INFO", "Attempting HTTP delivery via SendGrid")
+            http_result = _send_via_sendgrid(task_id, recipients, subject, message)
+            # Merge results - HTTP sends to all recipients in one call
+            results = http_result["results"]
+            sent_count = http_result["sent_count"]
+            error_count = http_result["error_count"]
+            status = http_result["status"]
+            email_provider_used = "sendgrid_http"
 
-            def connect_ssl() -> smtplib.SMTP:
-                ip = resolve_ipv4(smtp_host)
-                log_task(task_id, "INFO", f"Connecting to Gmail SMTP {smtp_host}:{smtp_ssl_port} via IPv4 {ip} (SSL)")
-                s = smtplib.SMTP_SSL(ip, smtp_ssl_port, timeout=20, context=ssl.create_default_context())
-                s.ehlo()
-                return s
+        # HTTP-only mode
+        elif EMAIL_PROVIDER == "http":
+            if SENDGRID_API_KEY:
+                log_task(task_id, "INFO", "Attempting HTTP delivery via SendGrid (HTTP mode)")
+                http_result = _send_via_sendgrid(task_id, recipients, subject, message)
+                results = http_result["results"]
+                sent_count = http_result["sent_count"]
+                error_count = http_result["error_count"]
+                status = http_result["status"]
+                email_provider_used = "sendgrid_http"
+            else:
+                log_task(task_id, "ERROR", "SendGrid API key not set for HTTP mode")
+                status = "missing_credentials"
+                error_count = len(recipients)
+                results = [{"to": r, "ok": False, "error": "missing_sendgrid_key"} for r in recipients]
 
-            try:
-                server = connect_starttls()
-            except Exception as e:
-                log_task(task_id, "WARN", f"STARTTLS connection failed, trying SSL fallback: {e}")
-                server = connect_ssl()
-
-            server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
-            log_task(task_id, "INFO", "Authenticated with Gmail SMTP")
-
-            for recipient in recipients:
-                if not isinstance(recipient, str) or not recipient.strip():
-                    error_count += 1
-                    results.append({"to": recipient, "ok": False, "error": "invalid_recipient"})
-                    continue
-
-                msg = MIMEText(message, _charset="utf-8")
-                msg["Subject"] = subject
-                msg["From"] = GMAIL_USER
-                msg["To"] = recipient
-
-                try:
-                    server.sendmail(GMAIL_USER, [recipient], msg.as_string())
-                    sent_count += 1
-                    results.append({"to": recipient, "ok": True})
-                except Exception as e:
-                    error_count += 1
-                    results.append({"to": recipient, "ok": False, "error": str(e)})
-                    log_task(task_id, "ERROR", f"Failed sending email to {recipient}: {e}")
-
-        except Exception as e:
-            status = "smtp_error"
-            error_count = len(recipients)
-            results = [{"to": r, "ok": False, "error": f"smtp_error: {e}"} for r in recipients]
-            log_task(task_id, "ERROR", f"Notifier SMTP error: {e}")
-        finally:
-            try:
-                if server is not None:
-                    server.quit()
-            except Exception:
-                pass
-
+    # Determine final status
     if error_count > 0 and sent_count == 0 and status == "sent":
         status = "failed"
     elif error_count > 0 and sent_count > 0 and status == "sent":
         status = "partial"
 
+    # Build artifact content
     content = json.dumps({
         "channel": channel,
-        "smtp": {"host": smtp_host, "port": smtp_port, "tls": True},
-        "from": GMAIL_USER,
+        "provider": email_provider_used,
+        "from": SENDGRID_FROM_EMAIL if email_provider_used == "sendgrid_http" else GMAIL_USER,
         "subject": subject,
         "sent_to": recipients,
         "message_preview": message[:100],
@@ -1503,21 +1642,21 @@ def run_notifier(task_id, job_id, payload):
         ContentType="application/json"
     )
 
-    # If we could not send anything for email channel, fail the task so it shows up clearly in UI/logs.
-    should_fail = channel == "email" and status in {"no_recipients", "missing_credentials", "smtp_error", "failed"}
+    # If we could not send anything for email channel, fail the task
+    should_fail = channel == "email" and status in {"no_recipients", "missing_credentials", "failed", "smtp_error", "sendgrid_error"}
 
     if should_fail:
         try:
             requests.post(
                 f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/fail",
                 json={
-                    "error": f"notifier_failed: status={status} sent={sent_count} failed={error_count}",
+                    "error": f"notifier_failed: status={status} sent={sent_count} failed={error_count} provider={email_provider_used}",
                     "artifact": {"type": "json", "filename": "notification.json", "storage_key": object_key},
                 },
                 timeout=5,
             )
         except Exception as e:
-            log_task(task_id, "ERROR", f"Failed to report notifier failure to orchestrator: {e}")
+            log_task(task_id, "ERROR", f"Failed to report notifier failure: {e}")
         worker_tasks_total.labels(result="failed").inc()
         log_task(task_id, "ERROR", f"Notification FAILED status={status} via {channel}: sent={sent_count} failed={error_count}")
         return
@@ -1532,13 +1671,14 @@ def run_notifier(task_id, job_id, payload):
                 "notifications_sent": sent_count,
                 "notifications_failed": error_count,
                 "status": status,
+                "provider": email_provider_used,
             },
             "artifact": {"type": "json", "filename": "notification.json", "storage_key": object_key}
         },
         timeout=5,
     )
     worker_tasks_total.labels(result="success").inc()
-    log_task(task_id, "INFO", f"Notification status={status} via {channel}: sent={sent_count} failed={error_count}")
+    log_task(task_id, "INFO", f"Notification status={status} via {channel}: sent={sent_count} failed={error_count} provider={email_provider_used}")
 
 
 def run_scraper(task_id, job_id, payload):
