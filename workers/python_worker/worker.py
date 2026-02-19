@@ -1397,8 +1397,9 @@ def _get_latest_job_pdf_attachment(task_id: str, job_id: Optional[str]) -> Optio
                 """
                 SELECT a.storage_key, a.filename, a.role
                 FROM artifacts a
-                JOIN tasks t ON a.task_id = t.id
-                WHERE t.job_id = %s AND a.type = 'pdf'
+                WHERE a.job_id = %s
+                  AND a.type = 'pdf'
+                  AND a.is_current = TRUE
                 ORDER BY (a.role = 'report') DESC, a.created_at DESC
                 LIMIT 1
                 """,
@@ -1419,6 +1420,12 @@ def _get_latest_job_pdf_attachment(task_id: str, job_id: Optional[str]) -> Optio
         except Exception as e:
             log_task(task_id, "ERROR", f"Failed to download PDF attachment from storage key '{storage_key}': {e}")
             return None
+
+        log_task(
+            task_id,
+            "INFO",
+            f"Resolved PDF attachment: storage_key='{storage_key}' role='{role}' bytes={len(content_bytes)}",
+        )
 
         return {
             "storage_key": storage_key,
@@ -1641,6 +1648,9 @@ def run_notifier(task_id, job_id, payload):
         status = "no_recipients"
     else:
         resolved_attachment = _get_latest_job_pdf_attachment(task_id, job_id=job_id)
+
+        if resolved_attachment is None:
+            log_task(task_id, "INFO", "No PDF attachment found for job; sending notification without attachment")
 
         # Try SMTP first if auto or smtp mode
         if EMAIL_PROVIDER in ("auto", "smtp"):
