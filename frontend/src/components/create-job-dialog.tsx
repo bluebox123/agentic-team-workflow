@@ -1,6 +1,6 @@
-import { Component, useCallback, useEffect, useMemo, useState, type ElementType, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ElementType } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Trash2, GripVertical, Play, CheckCircle, Smartphone, Layers, RefreshCcw, BarChart, PenTool, Calculator, FileText, Shield, ArrowLeftRight, Bell, Globe, LayoutGrid, List, Clock, XCircle, AlertCircle, Activity, Download } from "lucide-react";
+import { Plus, Trash2, GripVertical, Play, CheckCircle, Smartphone, Layers, RefreshCcw, BarChart, PenTool, Calculator, FileText, Shield, ArrowLeftRight, Bell, Globe, List, Clock, XCircle, AlertCircle, Activity, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,8 +9,6 @@ import { Label } from "@/components/ui/label";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { WorkflowBuilder, type WorkflowDAG } from "./WorkflowBuilder";
-import { WorkflowVisualizer } from "./WorkflowVisualizer";
 import { createWorkflow } from "../api/workflows";
 import { createJob, fetchJobTasks, fetchJobs, type Job, type TaskConfig } from "../api/jobs";
 import { fetchArtifacts, fetchArtifactBlob, fetchArtifactText, type Artifact } from "../api/artifacts";
@@ -21,46 +19,6 @@ interface CreateJobDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onSuccess: () => void;
-}
-
-class VisualBuilderErrorBoundary extends Component<
-    { onBackToList: () => void; children: ReactNode },
-    { hasError: boolean; errorMessage: string }
-> {
-    constructor(props: { onBackToList: () => void; children: ReactNode }) {
-        super(props);
-        this.state = { hasError: false, errorMessage: "" };
-    }
-
-    static getDerivedStateFromError(error: unknown) {
-        return {
-            hasError: true,
-            errorMessage: error instanceof Error ? error.message : "Visual builder crashed",
-        };
-    }
-
-    render() {
-        if (this.state.hasError) {
-            return (
-                <div className="h-full w-full flex items-center justify-center p-6">
-                    <div className="max-w-md w-full border rounded-lg bg-card p-4">
-                        <div className="text-sm font-medium mb-2">Visual Builder Error</div>
-                        <div className="text-xs text-muted-foreground whitespace-pre-wrap break-words mb-4">
-                            {this.state.errorMessage}
-                        </div>
-                        <div className="flex gap-2">
-                            <Button variant="outline" onClick={() => this.setState({ hasError: false, errorMessage: "" })}>
-                                Retry
-                            </Button>
-                            <Button onClick={this.props.onBackToList}>Back to List View</Button>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-
-        return this.props.children;
-    }
 }
 
 interface JobTask {
@@ -104,7 +62,6 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState("list");
-    const [visualWorkflow, setVisualWorkflow] = useState<WorkflowDAG | null>(null);
 
     // Job execution tracking - same as BrainPanel
     const [executingJob, setExecutingJob] = useState<Job | null>(null);
@@ -117,14 +74,6 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
     const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
     const [artifactText, setArtifactText] = useState<string>("");
     const [artifactObjectUrl, setArtifactObjectUrl] = useState<string>("");
-
-    const taskStatusByName = useMemo(() => {
-        const map: Record<string, string> = {};
-        for (const t of jobTasks) {
-            map[t.name] = t.status;
-        }
-        return map;
-    }, [jobTasks]);
 
     // Cleanup interval on unmount
     useEffect(() => {
@@ -276,37 +225,6 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
         setTasks(newTasks);
     };
 
-    const handleVisualWorkflowChange = useCallback((workflow: WorkflowDAG) => {
-        setVisualWorkflow(workflow);
-        const executionOrder = workflow.executionOrder || workflow.nodes.map((n: { id: string }) => n.id);
-        const newTasks = executionOrder.map((nodeId: string, index: number) => {
-            const node = workflow.nodes.find((n: { id: string }) => n.id === nodeId);
-            if (!node) return null;
-
-            let parentIndex: number | undefined = undefined;
-            if (node.dependencies.length > 0) {
-                const dependencyIndices = node.dependencies
-                    .map((depId: string) => executionOrder.indexOf(depId))
-                    .filter((idx: number) => idx !== -1 && idx < index);
-                
-                if (dependencyIndices.length > 0) {
-                    parentIndex = Math.max(...dependencyIndices);
-                }
-            }
-
-            return {
-                id: node.id,
-                name: node.id,
-                agent_type: node.agentType as TaskType,
-                type: node.agentType as TaskType,
-                payload: node.inputs as Record<string, unknown>,
-                parent_task_index: parentIndex
-            };
-        }).filter((t): t is NonNullable<typeof t> => t !== null);
-
-        setTasks(newTasks);
-    }, []);
-
     const handleSubmit = async () => {
         if (!title) { setError("Title is required"); return; }
         if (tasks.length === 0) { setError("Add at least one task"); return; }
@@ -381,7 +299,6 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
         setDescription("");
         setTasks([]);
         setSaveTemplate(false);
-        setVisualWorkflow(null);
         setActiveTab("list");
 
         onOpenChange(false);
@@ -455,10 +372,6 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                     <TabsTrigger value="list" className="gap-2" disabled={executingJob !== null}>
                                         <List className="w-4 h-4" />
                                         List View
-                                    </TabsTrigger>
-                                    <TabsTrigger value="visual" className="gap-2" disabled={executingJob !== null}>
-                                        <LayoutGrid className="w-4 h-4" />
-                                        Visual Builder
                                     </TabsTrigger>
                                     {executingJob && (
                                         <TabsTrigger value="execution" className="gap-2">
@@ -602,19 +515,6 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                 )}
                             </TabsContent>
 
-                            <TabsContent value="visual" className="flex-1 m-0 p-0 relative" style={{ minHeight: '400px' }}>
-                                <div className="absolute inset-0">
-                                    <VisualBuilderErrorBoundary onBackToList={() => setActiveTab('list')}>
-                                        <WorkflowBuilder
-                                            key="visual-builder"
-                                            workflow={visualWorkflow || undefined}
-                                            onWorkflowChange={handleVisualWorkflowChange}
-                                            mode="build"
-                                        />
-                                    </VisualBuilderErrorBoundary>
-                                </div>
-                            </TabsContent>
-
                             {/* Execution Tab - Same as BrainPanel */}
                             <TabsContent value="execution" className="flex-1 overflow-y-auto p-6 m-0">
                                 {executingJob && (
@@ -647,13 +547,6 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                                 </div>
                                             </CardHeader>
                                         </Card>
-
-                                        {/* Workflow Visualizer */}
-                                        {visualWorkflow && (
-                                            <div className="rounded-md border bg-muted/20 p-3">
-                                                <WorkflowVisualizer workflow={visualWorkflow} taskStatusByName={taskStatusByName} />
-                                            </div>
-                                        )}
 
                                         {/* Tasks */}
                                         {jobTasks.length > 0 && (

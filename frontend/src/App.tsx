@@ -14,9 +14,8 @@ import { JobTable } from "@/components/JobTable";
 import { ThemeProvider } from "@/components/theme-provider"
 import { ModeToggle } from "@/components/mode-toggle"
 import { CreateJobDialog } from "@/components/create-job-dialog"
-import { BrainPanel } from "@/components/BrainPanel";
 // import { TiltCard } from "@/components/tilt-card" // Removed 3D effect
-import { LayoutDashboard, Activity, AlertCircle, FileText, Layers, RefreshCcw, LogOut, Play, CheckCircle, XCircle, Sparkles } from "lucide-react";
+import { LayoutDashboard, Activity, AlertCircle, FileText, Layers, RefreshCcw, LogOut, Play, CheckCircle, XCircle } from "lucide-react";
 
 function getErrorMessage(e: unknown): string {
   if (typeof e === 'string') return e;
@@ -55,7 +54,7 @@ function App() {
   const [refreshInterval, setRefreshInterval] = useState<number | null>(null);
   const [logsInterval, setLogsInterval] = useState<number | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'jobs' | 'workflows' | 'dlq' | 'brain'>('jobs');
+  const [activeTab, setActiveTab] = useState<'jobs' | 'workflows' | 'dlq'>('jobs');
   const [jobsScope, setJobsScope] = useState<'mine' | 'org'>(() => (localStorage.getItem('jobsScope') as 'mine' | 'org') || 'mine');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -416,9 +415,6 @@ function App() {
             <Button variant={activeTab === 'workflows' ? "secondary" : "ghost"} size="sm" onClick={() => setActiveTab('workflows')}>
               <FileText className="mr-2 h-4 w-4" /> Workflows
             </Button>
-            <Button variant={activeTab === 'brain' ? "secondary" : "ghost"} size="sm" onClick={() => setActiveTab('brain')}>
-              <Sparkles className="mr-2 h-4 w-4 text-indigo-400" /> AI Creator
-            </Button>
             <Button variant={activeTab === 'dlq' ? "secondary" : "ghost"} size="sm" onClick={() => { setActiveTab('dlq'); loadDLQ(); }}>
               <AlertCircle className="mr-2 h-4 w-4" /> DLQ
             </Button>
@@ -632,10 +628,6 @@ function App() {
               )}
             </div>
 
-          )}
-
-          {activeTab === 'brain' && (
-            <BrainPanel />
           )}
 
           {selectedArtifact && (
