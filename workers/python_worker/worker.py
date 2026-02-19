@@ -1570,7 +1570,13 @@ def _send_via_smtp(
     elif error_count > 0 and sent_count > 0 and status == "sent":
         status = "partial"
 
-    return {"status": status, "sent_count": sent_count, "error_count": error_count, "results": results}
+    return {
+        "status": status,
+        "sent_count": sent_count,
+        "error_count": error_count,
+        "results": results,
+        "message_id": message_id,
+    }
 
 
 def _send_via_sendgrid(
@@ -1585,11 +1591,14 @@ def _send_via_sendgrid(
     sent_count = 0
     error_count = 0
     status = "sent"
+    message_id = None
 
     try:
-        from_email = SENDGRID_FROM_EMAIL or GMAIL_USER
+        # IMPORTANT: SendGrid frequently drops/blocks mail if the sender is not verified.
+        # Do not silently fall back to Gmail user here; force explicit SENDGRID_FROM_EMAIL.
+        from_email = SENDGRID_FROM_EMAIL
         if not from_email:
-            raise ValueError("No from email configured")
+            raise ValueError("SENDGRID_FROM_EMAIL is not set (must be a verified sender in SendGrid)")
 
         # SendGrid v3 API endpoint
         url = "https://api.sendgrid.com/v3/mail/send"
@@ -1634,11 +1643,18 @@ def _send_via_sendgrid(
         except Exception as e:
             log_task(task_id, "WARN", f"Could not read SendGrid response body: {e}")
 
+        # SendGrid typically returns 202 with an empty body. The only reliable identifier is X-Message-Id.
+        message_id = resp.headers.get("X-Message-Id") or resp.headers.get("x-message-id")
+        if message_id:
+            log_task(task_id, "INFO", f"SendGrid X-Message-Id: {message_id}")
+        else:
+            log_task(task_id, "WARN", "SendGrid response missing X-Message-Id header; delivery debugging will be harder")
+
         if resp.status_code in (200, 201, 202):
             # SendGrid accepted the request
             sent_count = len(recipients)
             for r in recipients:
-                results.append({"to": r, "ok": True})
+                results.append({"to": r, "ok": True, "message_id": message_id})
             log_task(task_id, "INFO", f"SendGrid accepted email request (HTTP {resp.status_code})")
         else:
             error_msg = f"SendGrid API error: HTTP {resp.status_code} - {resp.text[:200]}"
