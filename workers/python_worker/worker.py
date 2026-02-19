@@ -1739,6 +1739,7 @@ def run_notifier(task_id, job_id, payload):
                 results.extend(smtp_result["results"])
                 sent_count += smtp_result["sent_count"]
                 error_count += smtp_result["error_count"]
+                log_task(task_id, "INFO", f"SMTP result: status={smtp_result['status']}, sent={smtp_result['sent_count']}, errors={smtp_result['error_count']}")
                 if smtp_result["status"] == "sent":
                     status = "sent"
                     email_provider_used = "gmail_smtp"
@@ -1749,7 +1750,9 @@ def run_notifier(task_id, job_id, payload):
                     # SMTP failed. In auto mode we want to fall back to HTTP; in smtp mode we fail.
                     status = smtp_result["status"]
                     if EMAIL_PROVIDER == "auto":
-                        log_task(task_id, "INFO", "SMTP failed, will try HTTP fallback")
+                        log_task(task_id, "INFO", f"SMTP failed with status={status}, will try HTTP fallback")
+                    else:
+                        log_task(task_id, "ERROR", f"SMTP failed and EMAIL_PROVIDER=smtp, no fallback available")
             else:
                 log_task(task_id, "WARN", "Gmail credentials not set, skipping SMTP")
                 status = "missing_credentials"
@@ -1760,6 +1763,7 @@ def run_notifier(task_id, job_id, payload):
                     log_task(task_id, "INFO", "SMTP credentials missing, will try HTTP fallback")
 
         # Try HTTP fallback if auto mode and SMTP didn't fully succeed
+        log_task(task_id, "INFO", f"Checking HTTP fallback: EMAIL_PROVIDER={EMAIL_PROVIDER}, status={status}, SENDGRID_API_KEY={'SET' if SENDGRID_API_KEY else 'NOT_SET'}")
         if EMAIL_PROVIDER == "auto" and status not in ("sent", "partial") and SENDGRID_API_KEY:
             log_task(task_id, "INFO", "Attempting HTTP delivery via SendGrid")
             http_result = _send_via_sendgrid(task_id, recipients, subject, message, resolved_attachment)
@@ -1769,6 +1773,7 @@ def run_notifier(task_id, job_id, payload):
             error_count = http_result["error_count"]
             status = http_result["status"]
             email_provider_used = "sendgrid_http"
+            log_task(task_id, "INFO", f"SendGrid result: status={status}, message_id={http_result.get('message_id')}")
         elif EMAIL_PROVIDER == "auto" and status not in ("sent", "partial") and not SENDGRID_API_KEY:
             log_task(task_id, "ERROR", "SMTP failed and SENDGRID_API_KEY is not set; cannot use HTTP fallback")
             if status == "sent":
