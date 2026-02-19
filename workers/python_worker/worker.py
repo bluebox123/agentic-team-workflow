@@ -1399,14 +1399,38 @@ def _get_latest_job_pdf_attachment(task_id: str, job_id: Optional[str]) -> Optio
 
     try:
         with db_conn.cursor() as cur:
+            # CRITICAL FIX: Properly scope to job_id and get MOST RECENT PDF by created_at
+            # The old query ordered by (role='report') first which could pick wrong artifacts
+            
+            # First, debug: list ALL PDF artifacts for this job
             cur.execute(
                 """
-                SELECT a.storage_key, a.filename, a.role
+                SELECT a.storage_key, a.filename, a.role, a.created_at, a.id
                 FROM artifacts a
                 WHERE a.job_id = %s
                   AND a.type = 'pdf'
                   AND a.is_current = TRUE
-                ORDER BY (a.role = 'report') DESC, a.created_at DESC
+                ORDER BY a.created_at DESC
+                """,
+                (job_id,),
+            )
+            all_pdfs = cur.fetchall()
+            if all_pdfs:
+                log_task(task_id, "INFO", f"Job {job_id} has {len(all_pdfs)} PDF artifacts:")
+                for pdf in all_pdfs:
+                    log_task(task_id, "INFO", f"  - id={pdf[4][:8]}... storage={pdf[0]} role={pdf[2]} created={pdf[3]}")
+            else:
+                log_task(task_id, "WARN", f"Job {job_id} has NO PDF artifacts with is_current=TRUE")
+            
+            # Now get the most recent one
+            cur.execute(
+                """
+                SELECT a.storage_key, a.filename, a.role, a.created_at
+                FROM artifacts a
+                WHERE a.job_id = %s
+                  AND a.type = 'pdf'
+                  AND a.is_current = TRUE
+                ORDER BY a.created_at DESC
                 LIMIT 1
                 """,
                 (job_id,),
@@ -1414,11 +1438,15 @@ def _get_latest_job_pdf_attachment(task_id: str, job_id: Optional[str]) -> Optio
             row = cur.fetchone()
 
         if not row:
+            log_task(task_id, "WARN", f"No PDF artifact found for job_id={job_id}")
             return None
 
-        storage_key, filename, role = row
+        storage_key, filename, role, created_at = row
         if not storage_key:
+            log_task(task_id, "ERROR", f"PDF artifact has empty storage_key for job_id={job_id}")
             return None
+
+        log_task(task_id, "INFO", f"Found PDF artifact for job_id={job_id}: storage_key='{storage_key}' role='{role}' created_at='{created_at}'")
 
         try:
             resp = s3_client.get_object(Bucket=MINIO_BUCKET, Key=storage_key)
@@ -1430,7 +1458,7 @@ def _get_latest_job_pdf_attachment(task_id: str, job_id: Optional[str]) -> Optio
         log_task(
             task_id,
             "INFO",
-            f"Resolved PDF attachment: storage_key='{storage_key}' role='{role}' bytes={len(content_bytes)}",
+            f"Resolved PDF attachment for job_id={job_id}: storage_key='{storage_key}' role='{role}' bytes={len(content_bytes)}",
         )
 
         return {
@@ -1636,6 +1664,25 @@ def _send_via_sendgrid(
 
 def run_notifier(task_id, job_id, payload):
     """Send notifications (email) via Gmail SMTP with SendGrid HTTP fallback for Railway."""
+    # CRITICAL DEBUG: Log the job context at the start
+    log_task(task_id, "INFO", f"NOTIFIER START: task_id={task_id}, job_id={job_id}, payload_keys={list(payload.keys())}")
+    
+    # Verify job_id from database matches what was passed
+    try:
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT job_id, name, agent_type FROM tasks WHERE id = %s", (task_id,))
+            db_row = cur.fetchone()
+            if db_row:
+                db_job_id, db_name, db_agent_type = db_row
+                log_task(task_id, "INFO", f"NOTIFIER DB CHECK: task_id={task_id} has job_id={db_job_id}, name={db_name}, agent_type={db_agent_type}")
+                if db_job_id != job_id:
+                    log_task(task_id, "ERROR", f"NOTIFIER JOB MISMATCH: passed job_id={job_id} but DB says job_id={db_job_id}")
+                    job_id = db_job_id  # Use the correct job_id from DB
+            else:
+                log_task(task_id, "ERROR", f"NOTIFIER DB CHECK: task {task_id} not found in database!")
+    except Exception as e:
+        log_task(task_id, "ERROR", f"NOTIFIER DB CHECK FAILED: {e}")
+    
     channel = payload.get("channel", "email")
     recipients = payload.get("recipients")
     if recipients is None:
