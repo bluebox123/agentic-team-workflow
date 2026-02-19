@@ -574,6 +574,10 @@ def run_designer(task_id, job_id, payload):
         
         log_task(task_id, "INFO", f"PDF uploaded to {object_key}")
         
+        # Construct PDF download URL for template resolution
+        # The artifact will be available at the artifacts endpoint by job_id
+        pdf_download_url = f"/api/jobs/{job_id}/artifacts?type=pdf&role=report&download=1"
+        
         # Report back to orchestrator
         requests.post(
             f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
@@ -581,7 +585,9 @@ def run_designer(task_id, job_id, payload):
                 "result": {
                     "ok": True,
                     "job_id": job_id,
-                    "executor": "designer"
+                    "executor": "designer",
+                    "pdf_url": pdf_download_url,  # CRITICAL: for template {{tasks.designer.outputs.pdf_url}}
+                    "storage_key": object_key,
                 },
                 "artifact": {
                     "type": "pdf",
@@ -1588,7 +1594,17 @@ def _send_via_sendgrid(
             ]
 
         log_task(task_id, "INFO", f"Sending via SendGrid API to {len(recipients)} recipients from {from_email}")
+        log_task(task_id, "INFO", f"SendGrid request payload size: {len(json.dumps(data))} bytes")
         resp = requests.post(url, headers=headers, json=data, timeout=30)
+        
+        # Log full response details for debugging
+        log_task(task_id, "INFO", f"SendGrid response status: {resp.status_code}")
+        log_task(task_id, "INFO", f"SendGrid response headers: {dict(resp.headers)}")
+        try:
+            response_body = resp.text[:500] if resp.text else "(empty)"
+            log_task(task_id, "INFO", f"SendGrid response body: {response_body}")
+        except Exception as e:
+            log_task(task_id, "WARN", f"Could not read SendGrid response body: {e}")
 
         if resp.status_code in (200, 201, 202):
             # SendGrid accepted the request
