@@ -1575,7 +1575,6 @@ def _send_via_smtp(
         "sent_count": sent_count,
         "error_count": error_count,
         "results": results,
-        "message_id": message_id,
     }
 
 
