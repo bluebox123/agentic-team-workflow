@@ -1089,14 +1089,14 @@ Requirements:
 - If the text implies comparisons, categories, or rankings, call them out.
 
 Text:
-{text[:4000]}
+{text[:8000]}
 """
 
                 insights = ai_helper.generate_ai_response(
                     ai_prompt,
                     task_type="analyzer",
                     temperature=0.4,
-                    max_tokens=350,
+                    max_tokens=600,
                 )
                 stats = {
                     "analysis_mode": "text",
@@ -1187,22 +1187,32 @@ def run_summarizer(task_id, job_id, payload):
     """AI-powered text summarization"""
     text = payload.get("text", "")
     max_sentences = payload.get("max_sentences", 3)
+    max_words = payload.get("max_words") or payload.get("word_count")  # Support word count parameter
     
-    if not text:
+    if not text or not isinstance(text, str) or not text.strip():
         summary = "No text provided for summarization."
         original_length = 0
     else:
         try:
             # Use AI for abstractive summarization
-            ai_prompt = f"""Summarize the following text in {max_sentences} sentences or less. Be concise and capture the key points:
+            # Build constraint string
+            if max_words:
+                constraint = f"in approximately {max_words} words"
+            else:
+                constraint = f"in {max_sentences} sentences or less"
+            
+            # Use larger text slice for Wikipedia articles
+            text_input = text[:6000]  # Up to 6000 chars for richer content
+            
+            ai_prompt = f"""Summarize the following text {constraint}. Be concise and capture the key points:
 
-{text[:2000]}"""  # Limit input text to avoid token limits
+{text_input}"""
             
             summary = ai_helper.generate_ai_response(
                 ai_prompt,
                 task_type="summarizer",
                 temperature=0.5,
-                max_tokens=300
+                max_tokens=600
             )
             log_task(task_id, "INFO", "AI summarization completed")
             
@@ -1211,7 +1221,8 @@ def run_summarizer(task_id, job_id, payload):
             log_task(task_id, "WARN", f"AI summarization failed, using fallback: {e}")
             sentences = text.replace('!', '.').replace('?', '.').split('.')
             sentences = [s.strip() for s in sentences if s.strip()]
-            summary_sentences = sentences[:max_sentences]
+            n = int(max_words / 20) if max_words else max_sentences  # rough sentence count
+            summary_sentences = sentences[:n]
             summary = '. '.join(summary_sentences) + '.'
         
         original_length = len(text)
@@ -1317,7 +1328,17 @@ Keep it brief (2-3 sentences)."""
     requests.post(
         f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
         json={
-            "result": {"ok": True, "job_id": job_id, "executor": "validator", "valid": is_valid},
+            "result": {
+                "ok": True,
+                "job_id": job_id,
+                "executor": "validator",
+                "valid": is_valid,
+                "errors": errors,
+                "warnings": warnings,
+                "error_count": len(errors),
+                "warning_count": len(warnings),
+                "ai_validation": ai_validation,
+            },
             "artifact": {"type": "json", "filename": "validation.json", "storage_key": object_key}
         },
         timeout=5,
@@ -1331,6 +1352,8 @@ def run_transformer(task_id, job_id, payload):
     data = payload.get("data", [])
     transform_type = payload.get("transform", "uppercase")
     
+    transformed = data  # default: pass-through
+    
     if isinstance(data, list):
         # Basic transformations
         if transform_type == "uppercase":
@@ -1340,32 +1363,43 @@ def run_transformer(task_id, job_id, payload):
         elif transform_type == "reverse":
             transformed = list(reversed(data))
         elif transform_type == "unique":
-            transformed = list(set(data))
+            transformed = list(dict.fromkeys(str(x) for x in data))
         elif transform_type.startswith("ai:"):
             # AI-powered custom transformation
             try:
                 instruction = transform_type[3:]  # Remove "ai:" prefix
+                data_str = json.dumps(data, indent=2)[:3000]  # limit to 3000 chars
                 ai_prompt = f"""Transform the following data according to this instruction: {instruction}
 
-Data: {data[:50]}
+Data:
+{data_str}
 
-Provide the transformed data as a JSON array."""
+IMPORTANT: Return ONLY valid JSON (array or object), no explanation or markdown."""
                 
                 ai_result = ai_helper.generate_ai_response(
                     ai_prompt,
                     task_type="transformer",
-                    temperature=0.5,
-                    max_tokens=500
+                    temperature=0.3,
+                    max_tokens=800
                 )
                 
                 # Try to extract JSON from response
-                extracted_json = ai_helper.extract_json_from_response(ai_result)
-                if extracted_json and isinstance(extracted_json, list):
-                    transformed = extracted_json
+                import re as _re
+                # Try to find JSON array or object in the response
+                json_match = _re.search(r'(\[.*?\]|\{.*?\})', ai_result, _re.DOTALL)
+                if json_match:
+                    try:
+                        parsed = json.loads(json_match.group(1))
+                        transformed = parsed
+                    except json.JSONDecodeError:
+                        pass
                 else:
-                    # Fallback: return original data
-                    transformed = data
-                    log_task(task_id, "WARN", "Could not parse AI transformation result")
+                    try:
+                        parsed = json.loads(ai_result.strip())
+                        transformed = parsed
+                    except json.JSONDecodeError:
+                        log_task(task_id, "WARN", "Could not parse AI transformation result as JSON, using original")
+                        transformed = data
                 
                 log_task(task_id, "INFO", "AI transformation completed")
             except Exception as e:
@@ -1373,10 +1407,71 @@ Provide the transformed data as a JSON array."""
                 transformed = data
         else:
             transformed = data
-    else:
-        transformed = data
+    elif isinstance(data, dict):
+        # Handle dict inputs
+        if transform_type.startswith("ai:"):
+            try:
+                instruction = transform_type[3:]  # Remove "ai:" prefix
+                data_str = json.dumps(data, indent=2)[:3000]
+                ai_prompt = f"""Transform the following JSON data according to this instruction: {instruction}
+
+Data:
+{data_str}
+
+IMPORTANT: Return ONLY valid JSON (array or object), no explanation or markdown."""
+                
+                ai_result = ai_helper.generate_ai_response(
+                    ai_prompt,
+                    task_type="transformer",
+                    temperature=0.3,
+                    max_tokens=800
+                )
+                
+                import re as _re
+                json_match = _re.search(r'(\[.*?\]|\{.*?\})', ai_result, _re.DOTALL)
+                if json_match:
+                    try:
+                        transformed = json.loads(json_match.group(1))
+                    except json.JSONDecodeError:
+                        transformed = data
+                else:
+                    try:
+                        transformed = json.loads(ai_result.strip())
+                    except json.JSONDecodeError:
+                        transformed = data
+                
+                log_task(task_id, "INFO", "AI dict transformation completed")
+            except Exception as e:
+                log_task(task_id, "WARN", f"AI dict transformation failed: {e}")
+                transformed = data
+        else:
+            transformed = data
+    elif isinstance(data, str):
+        # Handle string inputs
+        if transform_type.startswith("ai:"):
+            try:
+                instruction = transform_type[3:]
+                ai_prompt = f"""Transform the following text according to this instruction: {instruction}
+
+Text:
+{data[:3000]}
+
+Return the transformed result as JSON (array or object) if the instruction implies structured output, otherwise return plain text."""
+                
+                ai_result = ai_helper.generate_ai_response(
+                    ai_prompt,
+                    task_type="transformer",
+                    temperature=0.3,
+                    max_tokens=800
+                )
+                transformed = ai_result
+                log_task(task_id, "INFO", "AI string transformation completed")
+            except Exception as e:
+                log_task(task_id, "WARN", f"AI string transformation failed: {e}")
+                transformed = data
     
-    content = json.dumps({"transformed": transformed, "original_count": len(data) if isinstance(data, list) else 0}).encode("utf-8")
+    original_count = len(data) if isinstance(data, list) else (len(data) if isinstance(data, dict) else 1)
+    content = json.dumps({"transformed": transformed, "result": transformed, "original_count": original_count}, indent=2, default=str).encode("utf-8")
     object_key = f"jobs/{job_id}/{task_id}_transform.json"
     
     s3_client.put_object(
@@ -1389,7 +1484,7 @@ Provide the transformed data as a JSON array."""
     requests.post(
         f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
         json={
-            "result": {"ok": True, "job_id": job_id, "executor": "transformer", "result": transformed},
+            "result": {"ok": True, "job_id": job_id, "executor": "transformer", "result": transformed, "transformed": transformed},
             "artifact": {"type": "json", "filename": "transform.json", "storage_key": object_key}
         },
         timeout=5,
@@ -1903,16 +1998,19 @@ def run_scraper(task_id, job_id, payload):
             # Extract content based on selector
             if selector:
                 elements = soup.select(selector)
-                items = [elem.get_text(strip=True) for elem in elements[:10]]  # Limit to 10 items
+                items = [elem.get_text(strip=True) for elem in elements[:30]]  # Limit to 30 items
                 log_task(task_id, "INFO", f"Found {len(elements)} elements matching selector '{selector}'")
             else:
-                # Extract all text if no selector
-                items = [p.get_text(strip=True) for p in soup.find_all('p')[:10]]
+                # Extract all text if no selector - get more paragraphs for richer content
+                all_paragraphs = [p.get_text(strip=True) for p in soup.find_all('p')]
+                items = [p for p in all_paragraphs if len(p) > 30][:30]  # Filter short paras, take up to 30
+                if not items:
+                    items = all_paragraphs[:20]  # fallback without length filter
                 log_task(task_id, "INFO", f"Extracted {len(items)} paragraphs (no selector)")
             
             # Use AI to summarize/analyze scraped content if available
             try:
-                content_preview = " ".join(items[:5])[:500]  # First 500 chars
+                content_preview = " ".join(items[:8])[:1000]  # First 1000 chars from first 8 items
                 ai_prompt = f"""Analyze this scraped web content and provide a brief summary:
 
 URL: {url}
@@ -1931,12 +2029,13 @@ Provide a 2-3 sentence summary of what this webpage contains."""
                 log_task(task_id, "WARN", f"AI analysis failed: {e}")
                 ai_summary = "AI analysis unavailable"
             
+            full_text = "\n\n".join(items)  # Full text for template resolution
             scraped_data = {
                 "url": url,
                 "selector": selector or "all paragraphs",
                 "items_found": len(items),
-                "sample_data": items[:5],  # First 5 items
-                "text": "\n".join(items),  # Full text for template resolution
+                "sample_data": items[:10],  # First 10 items as sample
+                "text": full_text,  # Full text for downstream agents
                 "ai_summary": ai_summary,
                 "status": "completed",
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
@@ -1971,6 +2070,9 @@ Provide a 2-3 sentence summary of what this webpage contains."""
         ContentType="application/json"
     )
     
+    # Pass full text to downstream agents via template resolution
+    # This is what {{tasks.scraper.outputs.text}} will resolve to
+    full_text_for_output = scraped_data.get("text", "") or "\n".join(scraped_data.get("sample_data", []))
     requests.post(
         f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
         json={
@@ -1978,8 +2080,10 @@ Provide a 2-3 sentence summary of what this webpage contains."""
                 "ok": True, 
                 "job_id": job_id, 
                 "executor": "scraper",
-                "text": "\n".join(scraped_data.get("sample_data", [])) if isinstance(scraped_data.get("sample_data"), list) else str(scraped_data),
-                "html": response.text if 'response' in locals() else "",
+                "text": full_text_for_output,  # CRITICAL: full text for downstream summarizer/analyzer
+                "html": response.text[:50000] if 'response' in locals() and hasattr(response, 'text') else "",
+                "url": scraped_data.get("url", ""),
+                "timestamp": scraped_data.get("timestamp", ""),
                 "result": scraped_data  # For backward compatibility with templates expecting .result
             },
             "artifact": {"type": "json", "filename": "scrape.json", "storage_key": object_key}
@@ -2097,45 +2201,80 @@ def handle_message(ch, method, properties, body):
         else:
             # AI-Powered Executor: handles any custom task with AI
             name = (task_name_db or "").strip()
-            prompt = task_payload_db.get("prompt", "") if isinstance(task_payload_db, dict) else ""
+            instruction = task_payload_db.get("instruction", "") if isinstance(task_payload_db, dict) else ""
+            prompt = task_payload_db.get("prompt", instruction) if isinstance(task_payload_db, dict) else ""
+            context = task_payload_db.get("context", "") if isinstance(task_payload_db, dict) else ""
             
             # Check if we have a custom prompt to use AI
-            if prompt:
+            if prompt or instruction:
                 try:
                     # Use AI to execute the custom task
                     log_task(task_id, "INFO", f"Executing custom task with AI: {name}")
                     
+                    task_prompt = prompt or instruction
+                    context_block = f"\n\nContext:\n{context[:3000]}" if context else ""
+                    
                     ai_prompt = f"""Execute this task:
 
 Task Name: {name}
-Instructions: {prompt}
+Instructions: {task_prompt}{context_block}
 
-Provide a detailed response completing this task. Be thorough and specific."""
+Provide a detailed response completing this task. Be thorough and specific.
+If the task requires structured data output (like counts, JSON, table), return it as valid JSON."""
                     
                     ai_response = ai_helper.generate_ai_response(
                         ai_prompt,
                         task_type="executor",
                         temperature=0.7,
-                        max_tokens=1000
+                        max_tokens=1200
                     )
                     
-                    content = ai_response.encode("utf-8")
+                    # Try to parse AI response as JSON for structured data
+                    import re as _re
+                    structured_result = None
+                    
+                    # Look for JSON in the response
+                    json_match = _re.search(r'(\[.*?\]|\{.*?\})', ai_response, _re.DOTALL)
+                    if json_match:
+                        try:
+                            parsed = json.loads(json_match.group(1))
+                            structured_result = parsed
+                            log_task(task_id, "INFO", "Extracted structured JSON from AI response")
+                        except json.JSONDecodeError:
+                            pass
+                    
+                    if structured_result is None:
+                        try:
+                            parsed = json.loads(ai_response.strip())
+                            structured_result = parsed
+                        except (json.JSONDecodeError, ValueError):
+                            pass  # response is plain text, that's fine
+                    
+                    result_to_return = structured_result if structured_result is not None else ai_response
+                    
+                    content = json.dumps({"result": result_to_return, "text": ai_response}, indent=2, default=str).encode("utf-8")
                     log_task(task_id, "INFO", "AI execution completed")
                     
                 except Exception as e:
                     # Fallback if AI fails
                     log_task(task_id, "WARN", f"AI execution failed: {e}, using fallback")
-                    content = f"Task '{name}' executed (AI unavailable).\nPrompt: {prompt}\n".encode("utf-8")
+                    ai_response = f"Task '{name}' executed (AI unavailable).\nPrompt: {prompt}\n"
+                    result_to_return = ai_response
+                    content = ai_response.encode("utf-8")
             else:
                 # Fallback for predefined tasks or tasks without prompts
                 if name.lower() == "fetch_data":
-                    content = json.dumps({"source": "demo", "rows": [1, 2, 3]}).encode("utf-8")
+                    result_to_return = {"source": "demo", "rows": [1, 2, 3]}
+                    content = json.dumps(result_to_return).encode("utf-8")
                 elif name.lower() == "process_data":
-                    content = json.dumps({"processed": True, "summary": "ok"}).encode("utf-8")
+                    result_to_return = {"processed": True, "summary": "ok"}
+                    content = json.dumps(result_to_return).encode("utf-8")
                 elif name.lower() == "generate_report":
-                    content = b"Report generated successfully.\n"
+                    result_to_return = "Report generated successfully."
+                    content = result_to_return.encode("utf-8")
                 else:
-                    content = f"Executed {name} successfully.\n".encode("utf-8")
+                    result_to_return = f"Executed {name} successfully."
+                    content = result_to_return.encode("utf-8")
 
             object_key = f"jobs/{job_id}/{task_id}.txt"
             
@@ -2145,7 +2284,7 @@ Provide a detailed response completing this task. Be thorough and specific."""
                     Bucket=MINIO_BUCKET,
                     Key=object_key,
                     Body=io.BytesIO(content),
-                    ContentType="text/plain"
+                    ContentType="application/json" if content[:1] in (b'{', b'[') else "text/plain"
                 )
                 log_task(task_id, "INFO", f"Artifact uploaded to {object_key}")
                 
@@ -2164,6 +2303,8 @@ Provide a detailed response completing this task. Be thorough and specific."""
                         "ok": True,
                         "job_id": job_id,
                         "worker": "python_worker",
+                        "result": result_to_return,  # CRITICAL: for {{tasks.X.outputs.result}} template
+                        "text": ai_response if 'ai_response' in locals() else str(result_to_return),
                     },
                     "artifact": artifact
                 }
@@ -2175,6 +2316,7 @@ Provide a detailed response completing this task. Be thorough and specific."""
                         "ok": True,
                         "job_id": job_id,
                         "worker": "python_worker",
+                        "result": result_to_return if 'result_to_return' in locals() else "",
                     }
                 }
             
