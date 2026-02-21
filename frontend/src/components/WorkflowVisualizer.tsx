@@ -64,9 +64,8 @@ const AgentNode = ({
 
     return (
         <div
-            className={`px-4 py-3 shadow-2xl rounded-lg border-2 transition-all duration-500 hover:scale-105 hover:-rotate-1 cursor-pointer group relative max-w-[250px] ${
-                isRunning ? 'animate-[nodePulse_1.8s_ease-in-out_infinite]' : ''
-            }`}
+            className={`px-4 py-3 shadow-2xl rounded-lg border-2 transition-all duration-500 hover:scale-105 hover:-rotate-1 cursor-pointer group relative max-w-[250px] ${isRunning ? 'animate-[nodePulse_1.8s_ease-in-out_infinite]' : ''
+                }`}
             style={{
                 background: getGradientForAgent(data.label),
                 borderColor,
@@ -117,8 +116,8 @@ const nodeTypes = {
 
 export function WorkflowVisualizer({ workflow, taskStatusByName }: WorkflowVisualizerProps) {
     // Debug logging
-    console.log('[WorkflowVisualizer] Render:', { 
-        hasWorkflow: !!workflow, 
+    console.log('[WorkflowVisualizer] Render:', {
+        hasWorkflow: !!workflow,
         nodeCount: workflow?.nodes?.length || 0,
         edgeCount: workflow?.edges?.length || 0,
         taskStatusCount: Object.keys(taskStatusByName || {}).length
@@ -129,86 +128,95 @@ export function WorkflowVisualizer({ workflow, taskStatusByName }: WorkflowVisua
         if (!workflow || !workflow.nodes || workflow.nodes.length === 0) {
             return { nodes: [], edges: [] };
         }
-        
+
         try {
             const rfNodes: Node[] = [];
             const rfEdges: Edge[] = [];
 
-        const xGap = 280;
-        const yGap = 120;
+            // TOP-DOWN layout: level controls Y (rows), sibling index controls X (columns)
+            const xGap = 300;
+            const yGap = 160;
 
-        const executionOrder = workflow.executionOrder || workflow.nodes.map(n => n.id);
+            const executionOrder = workflow.executionOrder || workflow.nodes.map(n => n.id);
 
-        // Calculate levels for better layout
-        const levels = new Map<string, number>();
-        const assignLevel = (nodeId: string, level: number = 0) => {
-            const currentLevel = levels.get(nodeId) ?? -1;
-            if (currentLevel < level) {
-                levels.set(nodeId, level);
+            // Calculate levels (depth) for each node
+            const levels = new Map<string, number>();
+            const assignLevel = (nodeId: string, level: number = 0) => {
+                const currentLevel = levels.get(nodeId) ?? -1;
+                if (currentLevel < level) {
+                    levels.set(nodeId, level);
+                    const node = workflow.nodes.find(n => n.id === nodeId);
+                    if (node) {
+                        workflow.edges
+                            .filter(e => e.from === nodeId)
+                            .forEach(e => assignLevel(e.to, level + 1));
+                    }
+                }
+            };
+
+            // Start level assignment from root nodes (no dependencies)
+            workflow.nodes
+                .filter(n => n.dependencies.length === 0)
+                .forEach(n => assignLevel(n.id, 0));
+
+            // Group nodes by level (for centering siblings)
+            const nodesByLevel = new Map<number, string[]>();
+            levels.forEach((level, nodeId) => {
+                if (!nodesByLevel.has(level)) {
+                    nodesByLevel.set(level, []);
+                }
+                nodesByLevel.get(level)!.push(nodeId);
+            });
+
+            executionOrder.forEach((nodeId) => {
                 const node = workflow.nodes.find(n => n.id === nodeId);
-                if (node) {
-                    workflow.edges
-                        .filter(e => e.from === nodeId)
-                        .forEach(e => assignLevel(e.to, level + 1));
-                }
-            }
-        };
+                if (!node) return;
 
-        // Start level assignment from root nodes
-        workflow.nodes
-            .filter(n => n.dependencies.length === 0)
-            .forEach(n => assignLevel(n.id, 0));
+                const level = levels.get(nodeId) ?? 0;
+                const nodesAtLevel = nodesByLevel.get(level) ?? [];
+                const indexAtLevel = nodesAtLevel.indexOf(nodeId);
+                const totalAtLevel = nodesAtLevel.length;
 
-        // Arrange nodes by level
-        const nodesByLevel = new Map<number, string[]>();
-        levels.forEach((level, nodeId) => {
-            if (!nodesByLevel.has(level)) {
-                nodesByLevel.set(level, []);
-            }
-            nodesByLevel.get(level)!.push(nodeId);
-        });
+                // Center siblings horizontally: offset from center
+                const centerOffset = ((totalAtLevel - 1) / 2) * xGap;
+                const xPos = indexAtLevel * xGap - centerOffset;
+                const yPos = level * yGap;
 
-        executionOrder.forEach((nodeId) => {
-            const node = workflow.nodes.find(n => n.id === nodeId);
-            if (!node) return;
+                // Show agentType and node id so parallel same-type nodes are distinct
+                const labelText = node.id !== node.agentType
+                    ? `${node.agentType} (${node.id})`
+                    : node.agentType;
 
-            const level = levels.get(nodeId) ?? 0;
-            const nodesAtLevel = nodesByLevel.get(level) ?? [];
-            const indexAtLevel = nodesAtLevel.indexOf(nodeId);
-
-            rfNodes.push({
-                id: node.id,
-                type: 'agent',
-                data: {
-                    label: `${node.agentType}`,
-                    inputs: node.inputs,
-                    taskStatus: taskStatusByName?.[node.id],
-                },
-                position: {
-                    x: level * xGap,
-                    y: indexAtLevel * yGap + (indexAtLevel % 2) * 20
-                }
+                rfNodes.push({
+                    id: node.id,
+                    type: 'agent',
+                    data: {
+                        label: labelText,
+                        inputs: node.inputs,
+                        taskStatus: taskStatusByName?.[node.id],
+                    },
+                    position: { x: xPos, y: yPos }
+                });
             });
-        });
 
-        workflow.edges.forEach(edge => {
-            rfEdges.push({
-                id: `${edge.from}-${edge.to}`,
-                source: edge.from,
-                target: edge.to,
-                animated: true,
-                style: {
-                    stroke: 'url(#edge-gradient)',
-                    strokeWidth: 3,
-                },
-                markerEnd: {
-                    type: MarkerType.ArrowClosed,
-                    color: '#667eea',
-                },
+            workflow.edges.forEach(edge => {
+                rfEdges.push({
+                    id: `${edge.from}-${edge.to}`,
+                    source: edge.from,
+                    target: edge.to,
+                    animated: true,
+                    style: {
+                        stroke: 'url(#edge-gradient)',
+                        strokeWidth: 3,
+                    },
+                    markerEnd: {
+                        type: MarkerType.ArrowClosed,
+                        color: '#667eea',
+                    },
+                });
             });
-        });
 
-        return { nodes: rfNodes, edges: rfEdges };
+            return { nodes: rfNodes, edges: rfEdges };
         } catch (err) {
             console.error('[WorkflowVisualizer] Error creating nodes/edges:', err);
             return { nodes: [], edges: [] };
