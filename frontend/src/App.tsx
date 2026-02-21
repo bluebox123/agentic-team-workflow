@@ -101,6 +101,30 @@ function App() {
     };
   }, [refreshInterval, logsInterval]);
 
+  // Auto-refresh jobs list every 5s when there are RUNNING/PENDING jobs
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const hasActiveJobs = jobs.some(j => j.status === 'RUNNING' || j.status === 'PENDING');
+    if (!hasActiveJobs) return;
+
+    const id = setInterval(async () => {
+      try {
+        const updated = await fetchJobs(jobsScope);
+        setJobs(updated);
+        // Also refresh selected job if it's still running
+        if (selectedJob) {
+          const fresh = updated.find(j => j.id === selectedJob.id);
+          if (fresh) setSelectedJob(fresh);
+        }
+      } catch {
+        // silently ignore auto-refresh errors
+      }
+    }, 5000);
+
+    return () => clearInterval(id);
+  }, [jobs, isAuthenticated, jobsScope, selectedJob]);
+
+
   useEffect(() => {
     return () => {
       if (artifactObjectUrl) URL.revokeObjectURL(artifactObjectUrl);
