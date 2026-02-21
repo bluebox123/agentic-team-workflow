@@ -129,8 +129,14 @@ export function BrainPanel() {
             setArtifactObjectUrl("");
         }
 
+        // Detect mime type: use metadata or fall back to filename extension
         const mime = artifact.mime_type || "";
-        if (mime.startsWith("text/") || mime === "" || mime === "application/json") {
+        const filename = (artifact.filename || "").toLowerCase();
+        const isPdf = mime === 'application/pdf' || filename.endsWith('.pdf');
+        const isImage = mime.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp|svg)$/.test(filename);
+        const isText = !isPdf && !isImage && (mime.startsWith('text/') || mime === 'application/json' || mime === '' || /\.(txt|json|csv|md|log)$/.test(filename));
+
+        if (isText) {
             try {
                 const text = await fetchArtifactText(artifact.id);
                 setArtifactText(text);
@@ -141,14 +147,29 @@ export function BrainPanel() {
             return;
         }
 
-        if (mime.startsWith('image/') || mime === 'application/pdf') {
+        if (isPdf || isImage) {
             try {
                 const blob = await fetchArtifactBlob(artifact.id);
-                const url = URL.createObjectURL(blob);
+                // Ensure the blob has the correct content type
+                const typedBlob = isPdf
+                    ? new Blob([blob], { type: 'application/pdf' })
+                    : blob;
+                const url = URL.createObjectURL(typedBlob);
                 setArtifactObjectUrl(url);
             } catch (error) {
                 console.error('Failed to fetch artifact blob:', error);
+                setArtifactText("Failed to load binary artifact.");
             }
+            return;
+        }
+
+        // Generic fallback: try as text
+        try {
+            const text = await fetchArtifactText(artifact.id);
+            setArtifactText(text);
+        } catch (error) {
+            console.error('Failed to fetch artifact:', error);
+            setArtifactText("Unable to display this artifact type.");
         }
     };
 
@@ -580,10 +601,21 @@ export function BrainPanel() {
                             </div>
                         </div>
                         <div className="flex-1 overflow-auto p-4 bg-muted/20">
-                            {selectedArtifact.mime_type?.startsWith('image/') ? (
+                            {selectedArtifact.mime_type?.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp|svg)$/.test((selectedArtifact.filename || '').toLowerCase()) ? (
                                 <img src={artifactObjectUrl} alt="artifact" className="max-w-full rounded mx-auto shadow-md" />
-                            ) : selectedArtifact.mime_type === 'application/pdf' ? (
-                                <iframe src={artifactObjectUrl} className="w-full h-[600px] rounded border" />
+                            ) : selectedArtifact.mime_type === 'application/pdf' || (selectedArtifact.filename || '').toLowerCase().endsWith('.pdf') ? (
+                                artifactObjectUrl ? (
+                                    <embed
+                                        src={artifactObjectUrl}
+                                        type="application/pdf"
+                                        className="w-full h-[600px] rounded border"
+                                        title={selectedArtifact.filename}
+                                    />
+                                ) : (
+                                    <div className="text-center p-8 text-muted-foreground">
+                                        <p>Loading PDF...</p>
+                                    </div>
+                                )
                             ) : (
                                 <pre className="text-xs p-4 bg-black/90 text-green-400 rounded overflow-auto font-mono">
                                     {artifactText || "Loading..."}

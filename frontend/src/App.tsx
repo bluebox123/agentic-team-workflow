@@ -115,8 +115,14 @@ function App() {
       setArtifactObjectUrl("");
     }
 
+    // Use mime_type or fall back to filename extension detection
     const mime = artifact.mime_type || "";
-    if (mime.startsWith("text/") || mime === "" || mime === "application/json") {
+    const filename = (artifact.filename || "").toLowerCase();
+    const isPdf = mime === 'application/pdf' || filename.endsWith('.pdf');
+    const isImage = mime.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp|svg)$/.test(filename);
+    const isText = !isPdf && !isImage && (mime.startsWith('text/') || mime === 'application/json' || mime === '' || /\.(txt|json|csv|md|log)$/.test(filename));
+
+    if (isText) {
       try {
         const text = await fetchArtifactText(artifact.id);
         setArtifactText(text);
@@ -126,14 +132,24 @@ function App() {
       return;
     }
 
-    if (mime.startsWith('image/') || mime === 'application/pdf') {
+    if (isPdf || isImage) {
       try {
         const blob = await fetchArtifactBlob(artifact.id);
-        const url = URL.createObjectURL(blob);
+        const typedBlob = isPdf ? new Blob([blob], { type: 'application/pdf' }) : blob;
+        const url = URL.createObjectURL(typedBlob);
         setArtifactObjectUrl(url);
       } catch (e) {
         setError(getErrorMessage(e));
       }
+      return;
+    }
+
+    // Generic fallback: try as text
+    try {
+      const text = await fetchArtifactText(artifact.id);
+      setArtifactText(text);
+    } catch (e) {
+      setError(getErrorMessage(e));
     }
   };
 
@@ -323,20 +339,20 @@ function App() {
 
   const handleStopAndRemoveOldJobs = async () => {
     if (!confirm('This will remove jobs older than 24 hours from the UI view only. Continue?')) return;
-    
+
     try {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const oldJobs = jobs.filter(job => 
-        new Date(job.created_at) < twentyFourHoursAgo && 
+      const oldJobs = jobs.filter(job =>
+        new Date(job.created_at) < twentyFourHoursAgo &&
         !['RUNNING', 'PAUSED', 'SCHEDULED'].includes(job.status)
       );
-      
+
       // Remove old jobs from state
-      setJobs(prevJobs => prevJobs.filter(job => 
-        new Date(job.created_at) >= twentyFourHoursAgo || 
+      setJobs(prevJobs => prevJobs.filter(job =>
+        new Date(job.created_at) >= twentyFourHoursAgo ||
         ['RUNNING', 'PAUSED', 'SCHEDULED'].includes(job.status)
       ));
-      
+
       setError(`UI cleanup completed: ${oldJobs.length} old jobs removed from view`);
       setTimeout(() => setError(null), 3000);
     } catch (e) {
@@ -649,10 +665,19 @@ function App() {
                   </div>
                 </div>
                 <div className="flex-1 overflow-auto p-4 bg-muted/20">
-                  {selectedArtifact.mime_type?.startsWith('image/') ? (
+                  {selectedArtifact.mime_type?.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp|svg)$/.test((selectedArtifact.filename || '').toLowerCase()) ? (
                     <img src={artifactObjectUrl} alt="artifact" className="max-w-full rounded mx-auto shadow-md" />
-                  ) : selectedArtifact.mime_type === 'application/pdf' ? (
-                    <iframe src={artifactObjectUrl} className="w-full h-[600px] rounded border" />
+                  ) : selectedArtifact.mime_type === 'application/pdf' || (selectedArtifact.filename || '').toLowerCase().endsWith('.pdf') ? (
+                    artifactObjectUrl ? (
+                      <embed
+                        src={artifactObjectUrl}
+                        type="application/pdf"
+                        className="w-full h-[600px] rounded border"
+                        title={selectedArtifact.filename}
+                      />
+                    ) : (
+                      <div className="text-center p-8 text-muted-foreground"><p>Loading PDF...</p></div>
+                    )
                   ) : (
                     <pre className="text-xs p-4 bg-black/90 text-green-400 rounded overflow-auto font-mono">
                       {artifactText || "Loading..."}
