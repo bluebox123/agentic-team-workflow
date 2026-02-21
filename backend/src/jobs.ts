@@ -127,6 +127,12 @@ router.post("/", async (req: AuthRequest, res) => {
       const parentTaskId =
         typeof parentIndex === "number" ? taskIds[parentIndex] : null;
 
+      // Build payload - inject target_task_id for reviewers
+      let payload = tasks[i].payload || {};
+      if (tasks[i].agent_type === 'reviewer' && parentTaskId) {
+        payload = { ...payload, target_task_id: parentTaskId };
+      }
+
       await client.query(
         `
         INSERT INTO tasks (
@@ -142,7 +148,7 @@ router.post("/", async (req: AuthRequest, res) => {
           parentTaskId,
           i,
           tasks[i].agent_type || 'executor',
-          tasks[i].payload ? JSON.stringify(tasks[i].payload) : JSON.stringify({}),
+          JSON.stringify(payload),
         ]
       );
     }

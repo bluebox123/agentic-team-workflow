@@ -4,6 +4,7 @@ import { Plus, Trash2, GripVertical, Play, CheckCircle, Smartphone, Layers, Refr
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -14,6 +15,7 @@ import { createJob, fetchJobTasks, fetchJobs, type Job, type TaskConfig } from "
 import { fetchArtifacts, fetchArtifactBlob, fetchArtifactText, type Artifact } from "../api/artifacts";
 import { fetchLogs } from "../api/logs";
 import { cn } from "@/lib/utils";
+import { WorkflowBuilder, type WorkflowDAG as VisualWorkflowDAG } from "@/components/WorkflowBuilder";
 
 interface CreateJobDialogProps {
     open: boolean;
@@ -43,9 +45,9 @@ interface BuilderTask extends TaskConfig {
 
 const availableTasks: { type: TaskType; label: string; icon: ElementType; defaultPayload: Record<string, unknown> }[] = [
     { type: "executor", label: "Executor Agent", icon: Smartphone, defaultPayload: { prompt: "" } },
-    { type: "reviewer", label: "Reviewer Agent", icon: CheckCircle, defaultPayload: { criteria: "" } },
+    { type: "reviewer", label: "Reviewer Agent", icon: CheckCircle, defaultPayload: { score_threshold: 80 } },
     { type: "designer", label: "Designer Agent", icon: PenTool, defaultPayload: { title: "New Report", sections: [{ heading: "Introduction", content: "This is a default section." }] } },
-    { type: "chart", label: "Chart Agent", icon: BarChart, defaultPayload: { type: "bar", title: "New Chart", x: [1, 2, 3], y: [10, 20, 30], x_label: "X", y_label: "Y" } },
+    { type: "chart", label: "Chart Agent", icon: BarChart, defaultPayload: { type: "bar", title: "New Chart", x: [1, 2, 3], y: [10, 20, 30], x_label: "X", y_label: "Y", role: "chart" } },
     { type: "analyzer", label: "Analyzer Agent", icon: Calculator, defaultPayload: { data: [1, 2, 3, 4, 5], analysis_type: "summary" } },
     { type: "summarizer", label: "Summarizer Agent", icon: FileText, defaultPayload: { text: "", max_sentences: 3 } },
     { type: "validator", label: "Validator Agent", icon: Shield, defaultPayload: { data: {}, rules: {} } },
@@ -53,6 +55,64 @@ const availableTasks: { type: TaskType; label: string; icon: ElementType; defaul
     { type: "notifier", label: "Notifier Agent", icon: Bell, defaultPayload: { channel: "email", recipients: [], subject: "", message: "" } },
     { type: "scraper", label: "Scraper Agent", icon: Globe, defaultPayload: { url: "", selector: "" } },
 ];
+
+type PayloadFieldKind = "string" | "number" | "boolean" | "json" | "string_array_comma";
+
+type PayloadFieldSchema = {
+    key: string;
+    label: string;
+    kind: PayloadFieldKind;
+    required?: boolean;
+    placeholder?: string;
+};
+
+const payloadSchemas: Record<TaskType, PayloadFieldSchema[]> = {
+    executor: [
+        { key: "prompt", label: "Prompt / Instruction", kind: "string", required: true, placeholder: "e.g. Write a summary of..." },
+    ],
+    reviewer: [
+        { key: "score_threshold", label: "Score Threshold", kind: "number", required: false, placeholder: "80" },
+    ],
+    scraper: [
+        { key: "url", label: "Website URL", kind: "string", required: true, placeholder: "https://example.com" },
+        { key: "selector", label: "CSS Selector (optional)", kind: "string", required: false, placeholder: ".content" },
+    ],
+    notifier: [
+        { key: "channel", label: "Channel", kind: "string", required: true, placeholder: "email" },
+        { key: "recipients", label: "Recipients (comma-separated)", kind: "string_array_comma", required: true, placeholder: "you@company.com, team@company.com" },
+        { key: "subject", label: "Subject", kind: "string", required: false, placeholder: "Your report is ready" },
+        { key: "message", label: "Message", kind: "string", required: true, placeholder: "Write the email message..." },
+    ],
+    designer: [
+        { key: "title", label: "Report Title", kind: "string", required: true, placeholder: "New Report" },
+        { key: "sections", label: "Sections (JSON)", kind: "json", required: true },
+    ],
+    chart: [
+        { key: "type", label: "Chart Type", kind: "string", required: true, placeholder: "bar" },
+        { key: "title", label: "Chart Title", kind: "string", required: true, placeholder: "New Chart" },
+        { key: "role", label: "Role", kind: "string", required: true, placeholder: "visitor_trends" },
+        { key: "x", label: "X (JSON)", kind: "json", required: true },
+        { key: "y", label: "Y (JSON)", kind: "json", required: true },
+        { key: "x_label", label: "X Label", kind: "string", required: false, placeholder: "X" },
+        { key: "y_label", label: "Y Label", kind: "string", required: false, placeholder: "Y" },
+    ],
+    analyzer: [
+        { key: "data", label: "Data (JSON)", kind: "json", required: true },
+        { key: "analysis_type", label: "Analysis Type", kind: "string", required: true, placeholder: "summary" },
+    ],
+    summarizer: [
+        { key: "text", label: "Text", kind: "string", required: true },
+        { key: "max_sentences", label: "Max Sentences", kind: "number", required: false, placeholder: "3" },
+    ],
+    validator: [
+        { key: "data", label: "Data (JSON)", kind: "json", required: true },
+        { key: "rules", label: "Rules (JSON)", kind: "json", required: true },
+    ],
+    transformer: [
+        { key: "data", label: "Data (JSON)", kind: "json", required: true },
+        { key: "transform", label: "Transform", kind: "string", required: true, placeholder: "uppercase" },
+    ],
+};
 
 export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDialogProps) {
     const [title, setTitle] = useState("");
@@ -62,6 +122,64 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState("list");
+
+    const [visualWorkflow, setVisualWorkflow] = useState<VisualWorkflowDAG>({ nodes: [], edges: [], executionOrder: [] });
+    const [applyingWorkflowToTasks, setApplyingWorkflowToTasks] = useState(false);
+
+    const tasksToWorkflow = useCallback((inputTasks: BuilderTask[]): VisualWorkflowDAG => {
+        const nodes = inputTasks.map((t) => ({
+            id: t.id,
+            agentType: t.agent_type ?? t.type,
+            inputs: t.payload ?? {},
+            dependencies: typeof t.parent_task_index === "number" && inputTasks[t.parent_task_index]
+                ? [inputTasks[t.parent_task_index].id]
+                : [],
+            outputMapping: {},
+        }));
+
+        const edges = inputTasks
+            .map((t) => {
+                if (typeof t.parent_task_index !== "number") return null;
+                const parent = inputTasks[t.parent_task_index];
+                if (!parent) return null;
+                return { from: parent.id, to: t.id };
+            })
+            .filter((e): e is { from: string; to: string } => e !== null);
+
+        return {
+            nodes,
+            edges,
+            executionOrder: inputTasks.map((t) => t.id),
+        };
+    }, []);
+
+    const workflowToTasks = useCallback((wf: VisualWorkflowDAG): BuilderTask[] => {
+        const nodes = Array.isArray(wf.nodes) ? wf.nodes : [];
+        const order = Array.isArray((wf as any).executionOrder) && (wf as any).executionOrder.length > 0
+            ? (wf as any).executionOrder as string[]
+            : nodes.map(n => n.id);
+
+        const nodeById = new Map(nodes.map(n => [n.id, n] as const));
+        const orderedNodes = order.map((id) => nodeById.get(id)).filter((n): n is NonNullable<typeof n> => !!n);
+
+        const indexById = new Map(orderedNodes.map((n, idx) => [n.id, idx] as const));
+
+        return orderedNodes.map((n) => {
+            const deps = Array.isArray((n as any).dependencies) ? (n as any).dependencies as string[] : [];
+            const parentId = deps[0];
+            const parentIndex = parentId ? indexById.get(parentId) : undefined;
+
+            const type = (n.agentType as TaskType) ?? "executor";
+            return {
+                id: n.id,
+                type,
+                name: n.id,
+                agent_type: type,
+                parent_task_index: typeof parentIndex === "number" ? parentIndex : undefined,
+                payload: (n.inputs ?? {}) as Record<string, unknown>,
+            };
+        });
+    }, []);
 
     // Job execution tracking - same as BrainPanel
     const [executingJob, setExecutingJob] = useState<Job | null>(null);
@@ -205,6 +323,12 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
         ]);
     };
 
+    useEffect(() => {
+        if (applyingWorkflowToTasks) return;
+        if (activeTab === "visual") return;
+        setVisualWorkflow(tasksToWorkflow(tasks));
+    }, [tasks, tasksToWorkflow, applyingWorkflowToTasks, activeTab]);
+
     const removeTask = (index: number) => {
         const newTasks = [...tasks];
         newTasks.splice(index, 1);
@@ -225,9 +349,49 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
         setTasks(newTasks);
     };
 
+    const validateTaskPayloads = (): string | null => {
+        for (const task of tasks) {
+            const schema = payloadSchemas[task.type] ?? [];
+            for (const field of schema) {
+                if (!field.required) continue;
+                const v = (task.payload as Record<string, unknown> | undefined)?.[field.key];
+
+                if (field.kind === "string") {
+                    if (typeof v !== "string" || v.trim() === "") {
+                        return `${task.name}: ${field.label} is required`;
+                    }
+                } else if (field.kind === "number") {
+                    if (typeof v !== "number" && typeof v !== "string") {
+                        return `${task.name}: ${field.label} is required`;
+                    }
+                    const n = typeof v === "number" ? v : Number(v);
+                    if (Number.isNaN(n)) return `${task.name}: ${field.label} must be a number`;
+                } else if (field.kind === "string_array_comma") {
+                    if (!Array.isArray(v) || v.length === 0) {
+                        return `${task.name}: ${field.label} is required`;
+                    }
+                } else if (field.kind === "json") {
+                    if (v === undefined || v === null) return `${task.name}: ${field.label} is required`;
+                    if (typeof v === "string" && v.trim() === "") return `${task.name}: ${field.label} is required`;
+                    if (typeof v === "object" && !Array.isArray(v) && Object.keys(v as Record<string, unknown>).length === 0) {
+                        return `${task.name}: ${field.label} is required`;
+                    }
+                    if (Array.isArray(v) && v.length === 0) return `${task.name}: ${field.label} is required`;
+                }
+            }
+        }
+        return null;
+    };
+
     const handleSubmit = async () => {
         if (!title) { setError("Title is required"); return; }
         if (tasks.length === 0) { setError("Add at least one task"); return; }
+
+        const payloadError = validateTaskPayloads();
+        if (payloadError) {
+            setError(payloadError);
+            return;
+        }
 
         setLoading(true);
         setError(null);
@@ -373,6 +537,10 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                         <List className="w-4 h-4" />
                                         List View
                                     </TabsTrigger>
+                                    <TabsTrigger value="visual" className="gap-2" disabled={executingJob !== null}>
+                                        <Layers className="w-4 h-4" />
+                                        Visual Builder
+                                    </TabsTrigger>
                                     {executingJob && (
                                         <TabsTrigger value="execution" className="gap-2">
                                             <Activity className="w-4 h-4 animate-pulse" />
@@ -427,75 +595,113 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                                         </div>
 
                                                         <div className="pl-11 space-y-3">
-                                                            {task.type === 'executor' && (
-                                                                <div className="space-y-1.5">
-                                                                    <Label className="text-xs text-muted-foreground">Prompt / Instruction</Label>
-                                                                    <Input
-                                                                        value={task.payload?.prompt as string || ""}
-                                                                        onChange={(e) => updateTask(index, "payload", e.target.value, "prompt")}
-                                                                        placeholder="e.g. Write a summary of..."
-                                                                        className="bg-muted/30"
+                                                            <div className="space-y-3">
+                                                                {(payloadSchemas[task.type] ?? []).map((field) => {
+                                                                    const rawValue = (task.payload as Record<string, unknown> | undefined)?.[field.key];
+                                                                    const label = field.required ? `${field.label} *` : field.label;
+
+                                                                    if (field.kind === "string") {
+                                                                        return (
+                                                                            <div key={field.key} className="space-y-1.5">
+                                                                                <Label className="text-xs text-muted-foreground">{label}</Label>
+                                                                                <Input
+                                                                                    value={typeof rawValue === "string" ? rawValue : (rawValue ?? "") as string}
+                                                                                    onChange={(e) => updateTask(index, "payload", e.target.value, field.key)}
+                                                                                    placeholder={field.placeholder}
+                                                                                    className="bg-muted/30"
+                                                                                />
+                                                                            </div>
+                                                                        );
+                                                                    }
+
+                                                                    if (field.kind === "number") {
+                                                                        const value = typeof rawValue === "number" ? String(rawValue) : (typeof rawValue === "string" ? rawValue : "");
+                                                                        return (
+                                                                            <div key={field.key} className="space-y-1.5">
+                                                                                <Label className="text-xs text-muted-foreground">{label}</Label>
+                                                                                <Input
+                                                                                    type="number"
+                                                                                    value={value}
+                                                                                    onChange={(e) => {
+                                                                                        const v = e.target.value;
+                                                                                        if (v === "") updateTask(index, "payload", "", field.key);
+                                                                                        else updateTask(index, "payload", Number(v), field.key);
+                                                                                    }}
+                                                                                    placeholder={field.placeholder}
+                                                                                    className="bg-muted/30"
+                                                                                />
+                                                                            </div>
+                                                                        );
+                                                                    }
+
+                                                                    if (field.kind === "string_array_comma") {
+                                                                        const value = Array.isArray(rawValue) ? (rawValue as unknown[]).map(String).join(", ") : (typeof rawValue === "string" ? rawValue : "");
+                                                                        return (
+                                                                            <div key={field.key} className="space-y-1.5">
+                                                                                <Label className="text-xs text-muted-foreground">{label}</Label>
+                                                                                <Input
+                                                                                    value={value}
+                                                                                    onChange={(e) => {
+                                                                                        const raw = e.target.value;
+                                                                                        const parsed = raw
+                                                                                            .split(",")
+                                                                                            .map(s => s.trim())
+                                                                                            .filter(Boolean);
+                                                                                        updateTask(index, "payload", parsed, field.key);
+                                                                                    }}
+                                                                                    placeholder={field.placeholder}
+                                                                                    className="bg-muted/30"
+                                                                                />
+                                                                            </div>
+                                                                        );
+                                                                    }
+
+                                                                    if (field.kind === "json") {
+                                                                        const value = typeof rawValue === "string"
+                                                                            ? rawValue
+                                                                            : (rawValue === undefined ? "" : JSON.stringify(rawValue, null, 2));
+
+                                                                        return (
+                                                                            <div key={field.key} className="space-y-1.5">
+                                                                                <Label className="text-xs text-muted-foreground">{label}</Label>
+                                                                                <Textarea
+                                                                                    value={value}
+                                                                                    onChange={(e) => {
+                                                                                        const t = e.target.value;
+                                                                                        try {
+                                                                                            const parsed = JSON.parse(t);
+                                                                                            updateTask(index, "payload", parsed, field.key);
+                                                                                        } catch {
+                                                                                            updateTask(index, "payload", t, field.key);
+                                                                                        }
+                                                                                    }}
+                                                                                    placeholder={field.placeholder}
+                                                                                    className="min-h-[80px] bg-muted/30 font-mono text-xs"
+                                                                                />
+                                                                            </div>
+                                                                        );
+                                                                    }
+
+                                                                    return null;
+                                                                })}
+
+                                                                <div className="pt-2">
+                                                                    <Label className="text-xs text-muted-foreground">Advanced Payload (JSON)</Label>
+                                                                    <Textarea
+                                                                        value={JSON.stringify(task.payload ?? {}, null, 2)}
+                                                                        onChange={(e) => {
+                                                                            const t = e.target.value;
+                                                                            try {
+                                                                                const parsed = JSON.parse(t);
+                                                                                updateTask(index, "payload", parsed);
+                                                                            } catch {
+                                                                                updateTask(index, "payload", task.payload ?? {});
+                                                                            }
+                                                                        }}
+                                                                        className="mt-1.5 min-h-[120px] bg-muted/30 font-mono text-xs"
                                                                     />
                                                                 </div>
-                                                            )}
-                                                            {task.type === 'reviewer' && (
-                                                                <div className="space-y-1.5">
-                                                                    <Label className="text-xs text-muted-foreground">Review Criteria</Label>
-                                                                    <Input
-                                                                        value={task.payload?.criteria as string || ""}
-                                                                        onChange={(e) => updateTask(index, "payload", e.target.value, "criteria")}
-                                                                        placeholder="e.g. Check for grammar and tone..."
-                                                                        className="bg-muted/30"
-                                                                    />
-                                                                </div>
-                                                            )}
-                                                            {task.type === 'notifier' && (
-                                                                <div className="space-y-3">
-                                                                    <div className="space-y-1.5">
-                                                                        <Label className="text-xs text-muted-foreground">Channel</Label>
-                                                                        <Input
-                                                                            value={task.payload?.channel as string || "email"}
-                                                                            onChange={(e) => updateTask(index, "payload", e.target.value, "channel")}
-                                                                            placeholder="email"
-                                                                            className="bg-muted/30"
-                                                                        />
-                                                                    </div>
-                                                                    <div className="space-y-1.5">
-                                                                        <Label className="text-xs text-muted-foreground">Recipients (comma-separated)</Label>
-                                                                        <Input
-                                                                            value={Array.isArray(task.payload?.recipients) ? (task.payload?.recipients as string[]).join(", ") : (task.payload?.recipients as string || "")}
-                                                                            onChange={(e) => {
-                                                                                const raw = e.target.value;
-                                                                                const parsed = raw
-                                                                                    .split(",")
-                                                                                    .map(s => s.trim())
-                                                                                    .filter(Boolean);
-                                                                                updateTask(index, "payload", parsed, "recipients");
-                                                                            }}
-                                                                            placeholder="samarthsaxena53@gmail.com"
-                                                                            className="bg-muted/30"
-                                                                        />
-                                                                    </div>
-                                                                    <div className="space-y-1.5">
-                                                                        <Label className="text-xs text-muted-foreground">Subject</Label>
-                                                                        <Input
-                                                                            value={task.payload?.subject as string || ""}
-                                                                            onChange={(e) => updateTask(index, "payload", e.target.value, "subject")}
-                                                                            placeholder="Your report is ready"
-                                                                            className="bg-muted/30"
-                                                                        />
-                                                                    </div>
-                                                                    <div className="space-y-1.5">
-                                                                        <Label className="text-xs text-muted-foreground">Message</Label>
-                                                                        <Input
-                                                                            value={task.payload?.message as string || ""}
-                                                                            onChange={(e) => updateTask(index, "payload", e.target.value, "message")}
-                                                                            placeholder="Write the email message..."
-                                                                            className="bg-muted/30"
-                                                                        />
-                                                                    </div>
-                                                                </div>
-                                                            )}
+                                                            </div>
                                                         </div>
                                                     </Card>
                                                 </motion.div>
@@ -513,6 +719,26 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                         </motion.div>
                                     </div>
                                 )}
+                            </TabsContent>
+
+                            <TabsContent value="visual" className="flex-1 overflow-hidden p-6 m-0">
+                                <div className="h-full">
+                                    <WorkflowBuilder
+                                        workflow={visualWorkflow}
+                                        mode="build"
+                                        onWorkflowChange={(wf) => {
+                                            setVisualWorkflow(wf);
+                                            setApplyingWorkflowToTasks(true);
+                                            try {
+                                                const nextTasks = workflowToTasks(wf);
+                                                setTasks(nextTasks);
+                                            } finally {
+                                                setApplyingWorkflowToTasks(false);
+                                            }
+                                        }}
+                                        readOnly={false}
+                                    />
+                                </div>
                             </TabsContent>
 
                             {/* Execution Tab - Same as BrainPanel */}
