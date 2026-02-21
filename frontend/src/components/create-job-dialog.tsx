@@ -538,7 +538,7 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
 
                     {/* Main Content with Tabs */}
                     <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-                        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 h-full">
+                        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
                             <div className="border-b px-6 pt-4">
                                 <TabsList className="bg-muted/50">
                                     <TabsTrigger value="list" className="gap-2" disabled={executingJob !== null}>
@@ -558,8 +558,9 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                 </TabsList>
                             </div>
 
-                            <TabsContent value="list" className="flex-1 h-full overflow-y-auto p-6 pb-24 m-0 min-h-0">
-                                {tasks.length === 0 ? (
+                            <TabsContent value="list" className="flex-1 flex flex-col overflow-hidden p-0 m-0">
+                                <div className="flex-1 overflow-y-auto p-6 pb-24">
+                                    {tasks.length === 0 ? (
                                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-60 border-2 border-dashed rounded-xl">
                                         <Layers className="w-12 h-12 mb-4 text-slate-300 dark:text-slate-700" />
                                         <p>Select a task from the library to start building</p>
@@ -727,9 +728,10 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                         </motion.div>
                                     </div>
                                 )}
+                                </div>
                             </TabsContent>
 
-                            <TabsContent value="visual" className="flex-1 h-full overflow-hidden p-6 m-0 min-h-0">
+                            <TabsContent value="visual" className="flex-1 overflow-hidden p-6 m-0 min-h-0">
                                 <div className="h-full">
                                     <WorkflowBuilder
                                         workflow={visualWorkflow}
@@ -750,7 +752,7 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                             </TabsContent>
 
                             {/* Execution Tab - Same as BrainPanel */}
-                            <TabsContent value="execution" className="flex-1 h-full overflow-y-auto p-6 m-0 min-h-0">
+                            <TabsContent value="execution" className="flex-1 overflow-y-auto p-6 m-0">
                                 {executingJob && (
                                     <div className="space-y-6">
                                         {/* Job Status Header */}
