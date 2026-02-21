@@ -33,6 +33,9 @@ Rules:
    - \`{"type": "chart", "role": "<role_value>"}\` where role matches the chart's role input
    - Example: If a chart has \`inputs: { "role": "visitor_trends" }\`, the designer section should have \`"artifact": { "type": "chart", "role": "visitor_trends" }\`
    - Do NOT use template syntax like \`{{tasks.chart.outputs.image_url}}\` for artifact references
+10. **MULTIPLE CHARTS**: If the user requests N distinct charts, create EXACTLY N separate chart nodes with unique IDs and unique role values. Never merge multiple requested charts into one node.
+    - Example: User requests "a bar chart for sales AND a line chart for tickets" → two nodes: {"id":"chart_sales","agentType":"chart","inputs":{"title":"Sales","type":"bar","role":"sales_chart",...}} AND {"id":"chart_tickets","agentType":"chart","inputs":{"title":"Tickets","type":"bar","role":"tickets_chart",...}}
+    - The designer must reference EACH chart using its role: {"artifact":{"type":"chart","role":"sales_chart"}} and {"artifact":{"type":"chart","role":"tickets_chart"}}
 
 Response Format (JSON only):
 {
