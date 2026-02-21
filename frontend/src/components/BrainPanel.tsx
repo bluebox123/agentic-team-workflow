@@ -196,7 +196,7 @@ export function BrainPanel() {
                         const latestTask = tasksRaw[tasksRaw.length - 1] as { id?: unknown };
                         if (latestTask?.id && typeof latestTask.id === 'string') {
                             const logs = await fetchLogs(latestTask.id);
-                        setJobLogs(logs);
+                            setJobLogs(logs);
                         }
                     }
 
@@ -317,6 +317,15 @@ export function BrainPanel() {
                                     placeholder="e.g. 'Scrape https://example.com, summarize the content, and email it to user@example.com'"
                                     value={prompt}
                                     onChange={(e) => setPrompt(e.target.value)}
+                                    onInput={(e) => setPrompt(e.currentTarget.value)}
+                                    onPasteCapture={(e) => {
+                                        // Give the DOM a tick to update the textarea value after paste
+                                        setTimeout(() => {
+                                            if (e.target instanceof HTMLTextAreaElement) {
+                                                setPrompt(e.target.value);
+                                            }
+                                        }, 10);
+                                    }}
                                     className="flex-1 min-h-[120px]"
                                 />
                             </div>
