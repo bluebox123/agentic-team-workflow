@@ -1253,18 +1253,23 @@ def run_validator(task_id, job_id, payload):
     warnings = []
     
     # Basic rule-based validation
-    for field, rule in rules.items():
-        value = data.get(field)
-        if rule.get("required") and not value:
-            errors.append(f"Missing required field: {field}")
-        if value and rule.get("type"):
-            if rule["type"] == "number" and not isinstance(value, (int, float)):
-                errors.append(f"Field {field} should be a number")
-            if rule["type"] == "string" and not isinstance(value, str):
-                errors.append(f"Field {field} should be a string")
-        if value and rule.get("min") is not None:
-            if isinstance(value, (int, float)) and value < rule["min"]:
-                warnings.append(f"Field {field} below minimum: {value} < {rule['min']}")
+    items = data if isinstance(data, list) else [data]
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            errors.append(f"Item {i} is not a dictionary. Cannot validate fields.")
+            continue
+        for field, rule in rules.items():
+            value = item.get(field)
+            if rule.get("required") and not value:
+                errors.append(f"Row {i} Missing required field: {field}")
+            if value and rule.get("type"):
+                if rule["type"] == "number" and not isinstance(value, (int, float)):
+                    errors.append(f"Row {i} Field {field} should be a number")
+                if rule["type"] == "string" and not isinstance(value, str):
+                    errors.append(f"Row {i} Field {field} should be a string")
+            if value and rule.get("min") is not None:
+                if isinstance(value, (int, float)) and value < rule["min"]:
+                    warnings.append(f"Row {i} Field {field} below minimum: {value} < {rule['min']}")
     
     # AI-powered semantic validation
     if data and rules:
@@ -1384,7 +1389,7 @@ Provide the transformed data as a JSON array."""
     requests.post(
         f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
         json={
-            "result": {"ok": True, "job_id": job_id, "executor": "transformer"},
+            "result": {"ok": True, "job_id": job_id, "executor": "transformer", "result": transformed},
             "artifact": {"type": "json", "filename": "transform.json", "storage_key": object_key}
         },
         timeout=5,
