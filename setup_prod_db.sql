@@ -37,7 +37,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   retry_count INT DEFAULT 0,
   created_at TIMESTAMP DEFAULT now(),
   started_at TIMESTAMP,
-  finished_at TIMESTAMP
+  finished_at TIMESTAMP,
+  review_score INT,
+  review_decision TEXT,
+  review_feedback JSONB
 );
 
 CREATE TABLE IF NOT EXISTS outputs (
