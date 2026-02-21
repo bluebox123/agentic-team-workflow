@@ -79,7 +79,7 @@ const payloadSchemas: Record<TaskType, PayloadFieldSchema[]> = {
     ],
     notifier: [
         { key: "channel", label: "Channel", kind: "string", required: true, placeholder: "email" },
-        { key: "recipients", label: "Recipients (comma-separated)", kind: "string_array_comma", required: true, placeholder: "you@company.com, team@company.com" },
+        { key: "recipients", label: "Recipients (comma-separated)", kind: "string_array_comma", required: false, placeholder: "you@company.com, team@company.com" },
         { key: "subject", label: "Subject", kind: "string", required: false, placeholder: "Your report is ready" },
         { key: "message", label: "Message", kind: "string", required: true, placeholder: "Write the email message..." },
     ],
@@ -88,17 +88,19 @@ const payloadSchemas: Record<TaskType, PayloadFieldSchema[]> = {
         { key: "sections", label: "Sections (JSON)", kind: "json", required: true },
     ],
     chart: [
-        { key: "type", label: "Chart Type", kind: "string", required: true, placeholder: "bar" },
-        { key: "title", label: "Chart Title", kind: "string", required: true, placeholder: "New Chart" },
+        { key: "type", label: "Chart Type", kind: "string", required: false, placeholder: "bar" },
+        { key: "title", label: "Chart Title", kind: "string", required: false, placeholder: "New Chart" },
+        { key: "text", label: "Instruction / Context (optional)", kind: "string", required: false, placeholder: "e.g. Create a bar chart of revenue by month" },
         { key: "role", label: "Role", kind: "string", required: true, placeholder: "visitor_trends" },
-        { key: "x", label: "X (JSON)", kind: "json", required: true },
-        { key: "y", label: "Y (JSON)", kind: "json", required: true },
+        { key: "x", label: "X (JSON)", kind: "json", required: false },
+        { key: "y", label: "Y (JSON)", kind: "json", required: false },
         { key: "x_label", label: "X Label", kind: "string", required: false, placeholder: "X" },
         { key: "y_label", label: "Y Label", kind: "string", required: false, placeholder: "Y" },
     ],
     analyzer: [
-        { key: "data", label: "Data (JSON)", kind: "json", required: true },
-        { key: "analysis_type", label: "Analysis Type", kind: "string", required: true, placeholder: "summary" },
+        { key: "text", label: "Text (optional)", kind: "string", required: false, placeholder: "Paste text to analyze" },
+        { key: "data", label: "Data (JSON, optional)", kind: "json", required: false },
+        { key: "analysis_type", label: "Analysis Type (optional)", kind: "string", required: false, placeholder: "summary" },
     ],
     summarizer: [
         { key: "text", label: "Text", kind: "string", required: true },
@@ -329,6 +331,12 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
         setVisualWorkflow(tasksToWorkflow(tasks));
     }, [tasks, tasksToWorkflow, applyingWorkflowToTasks, activeTab]);
 
+    useEffect(() => {
+        if (applyingWorkflowToTasks) return;
+        if (activeTab !== "visual") return;
+        setVisualWorkflow(tasksToWorkflow(tasks));
+    }, [tasks, tasksToWorkflow, applyingWorkflowToTasks, activeTab]);
+
     const removeTask = (index: number) => {
         const newTasks = [...tasks];
         newTasks.splice(index, 1);
@@ -470,7 +478,7 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-6xl h-[85vh] flex flex-col p-0 gap-0 bg-background/95 backdrop-blur-md border-border/60">
+            <DialogContent className="max-w-6xl h-[85vh] flex flex-col p-0 gap-0 bg-background/95 backdrop-blur-md border-border/60 overflow-hidden">
                 <DialogHeader className="p-6 border-b">
                     <DialogTitle className="text-xl font-light tracking-wide flex items-center gap-2">
                         <span className="bg-primary/10 p-2 rounded-full text-primary"><Plus className="w-5 h-5" /></span>
@@ -481,7 +489,7 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="flex-1 flex overflow-hidden">
+                <div className="flex-1 flex overflow-hidden min-h-0">
                     {/* Sidebar - Task Library */}
                     <div className="w-64 border-r bg-muted/30 p-4 flex flex-col gap-4 overflow-y-auto">
                         <div className="space-y-4">
@@ -529,7 +537,7 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                     </div>
 
                     {/* Main Content with Tabs */}
-                    <div className="flex-1 flex flex-col overflow-hidden">
+                    <div className="flex-1 flex flex-col overflow-hidden min-h-0">
                         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
                             <div className="border-b px-6 pt-4">
                                 <TabsList className="bg-muted/50">
@@ -550,7 +558,7 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                 </TabsList>
                             </div>
 
-                            <TabsContent value="list" className="flex-1 overflow-y-auto p-6 m-0">
+                            <TabsContent value="list" className="flex-1 overflow-y-auto p-6 pb-24 m-0 min-h-0">
                                 {tasks.length === 0 ? (
                                     <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-60 border-2 border-dashed rounded-xl">
                                         <Layers className="w-12 h-12 mb-4 text-slate-300 dark:text-slate-700" />
@@ -721,7 +729,7 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                 )}
                             </TabsContent>
 
-                            <TabsContent value="visual" className="flex-1 overflow-hidden p-6 m-0">
+                            <TabsContent value="visual" className="flex-1 overflow-hidden p-6 m-0 min-h-0">
                                 <div className="h-full">
                                     <WorkflowBuilder
                                         workflow={visualWorkflow}
