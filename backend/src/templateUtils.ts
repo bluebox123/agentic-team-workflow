@@ -24,7 +24,7 @@ export async function resolveTaskInputs(
     );
 
     console.log(`[TEMPLATE] Resolving inputs for job ${jobId}, found ${rows.length} completed tasks:`);
-    
+
     const context: Record<string, any> = {
         tasks: {},
         parent: null
@@ -34,17 +34,17 @@ export async function resolveTaskInputs(
         // Handle both flat and nested result structures
         // The result from DB might be: { result: actualData } or actualData directly
         const rawResult = row.result ? (row.result.result || row.result) : {};
-        
+
         console.log(`[TEMPLATE] Task '${row.name}': result type=${typeof row.result}, has result.result=${!!row.result?.result}`);
         console.log(`[TEMPLATE] Task '${row.name}': raw result keys=${Object.keys(rawResult).join(', ')}`);
         console.log(`[TEMPLATE] Task '${row.name}': text present=${'text' in rawResult}, text length=${rawResult.text?.length || 0}`);
-        
+
         // DEBUG: Special logging for analyzer tasks
         if (row.name && (row.name.includes('analyze') || row.name.includes('analyzer'))) {
             console.log(`[TEMPLATE] ANALYZER TASK '${row.name}': full result=${JSON.stringify(row.result).substring(0, 200)}`);
             console.log(`[TEMPLATE] ANALYZER TASK '${row.name}': insights present=${'insights' in rawResult}, insights value=${rawResult.insights?.substring(0, 50)}`);
         }
-        
+
         // Store the outputs with the raw result data
         // This ensures tasks.X.outputs.result works if the data has a result field
         // or tasks.X.outputs works for direct access
@@ -89,7 +89,7 @@ export async function resolveTaskInputs(
             };
         }
     }
-    
+
     console.log(`[TEMPLATE] Built context with task names: ${Object.keys(context.tasks).join(', ')}`);
 
     // 2. Perform substitution
@@ -106,8 +106,10 @@ export function substitute(obj: any, context: any): any {
             const val = getPath(context, path);
             console.log(`[TEMPLATE] Looking up path '${path}', got type=${typeof val}, value=${JSON.stringify(val)?.substring(0, 50)}`);
             if (val !== undefined && val !== null && val !== '') {
-                console.log(`[TEMPLATE] Resolved {{${path}}} -> ${String(val).substring(0, 50)}`);
-                return String(val);
+                // Serialize objects/arrays as JSON; primitives as string
+                const serialized = typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val);
+                console.log(`[TEMPLATE] Resolved {{${path}}} -> ${serialized.substring(0, 80)}`);
+                return serialized;
             } else {
                 console.log(`[TEMPLATE] NOT FOUND or EMPTY: {{${path}}} - val=${JSON.stringify(val)} - keeping original`);
                 return match; // keep original if not found
