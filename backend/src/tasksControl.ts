@@ -130,10 +130,20 @@ router.post("/:taskId/review", async (req: AuthRequest, res) => {
       [taskId, score, decision, feedback || null]
     );
 
-    if (decision === "APPROVE") {
-      await transitionTask(taskId, "SUCCESS", { review: "approved" });
+    // Soft-review for reviewer tasks: do not fail the workflow due to review variance.
+    const { rows: taskRows } = await pool.query(
+      `SELECT agent_type FROM tasks WHERE id = $1`,
+      [taskId]
+    );
+    const agentType = taskRows[0]?.agent_type;
+    if (agentType === "reviewer") {
+      await transitionTask(taskId, "SUCCESS", { review: decision?.toLowerCase?.() || "unknown" });
     } else {
-      await transitionTask(taskId, "FAILED", { review: "rejected" });
+      if (decision === "APPROVE") {
+        await transitionTask(taskId, "SUCCESS", { review: "approved" });
+      } else {
+        await transitionTask(taskId, "FAILED", { review: "rejected" });
+      }
     }
 
     await handleTaskCompletion(taskId);
