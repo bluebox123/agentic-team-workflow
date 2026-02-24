@@ -818,6 +818,7 @@ def run_chart(task_id, job_id, payload):
     import matplotlib.pyplot as plt
     import re
     import csv
+    from collections import defaultdict
 
     def _sanitize_unresolved_templates(obj):
         """Replace unresolved {{...}} templates with safe defaults so charts don't fail/DLQ."""
@@ -948,6 +949,195 @@ def run_chart(task_id, job_id, payload):
 
         return x_out, y_out, (xf or "Index"), (yf or "Value")
 
+    def _llm_plot_plan_from_rows(rows, preferred_type: str | None, title_hint: str | None, text_hint: str | None):
+        """Ask LLM for a plotting plan (field selection + aggregation), but never for fabricated values."""
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            return None
+        fields = list(rows[0].keys())
+        sample_rows = rows[:8]
+        pref = (preferred_type or "").strip().lower()
+        prompt = f"""You are helping choose how to plot an existing dataset.
+
+You MUST NOT invent data values.
+You MUST select fields only from the provided field list.
+
+Given fields and sample rows, output STRICT JSON (no markdown) with this schema:
+{{
+  \"chart_type\": \"bar\"|\"line\"|\"scatter\"|\"area\"|\"pie\"|\"histogram\",
+  \"x_field\": string|null,
+  \"y_field\": string|null,
+  \"group_by\": string|null,
+  \"aggregation\": \"sum\"|\"avg\"|\"count\"|\"none\",
+  \"bins\": number|null,
+  \"x_label\": string|null,
+  \"y_label\": string|null
+}}
+
+Rules:
+- If you choose histogram, set y_field to a numeric field and x_field/group_by to null.
+- If you choose pie, set group_by to a categorical field and aggregation to sum/avg/count.
+- If you choose bar/line/area and y_field is numeric, you may set group_by to a categorical field and aggregation to sum/avg/count.
+- If rows already look like an ordered series, you can set x_field to a field (or null to use index) and aggregation to none.
+
+Preferred chart_type (may be empty): {pref}
+Title hint: {title_hint or ''}
+Text hint: {text_hint or ''}
+
+Fields: {fields}
+Sample rows: {json.dumps(sample_rows, default=str)[:3500]}
+"""
+
+        try:
+            resp = ai_helper.generate_ai_response(
+                prompt,
+                task_type="chart",
+                temperature=0.2,
+                max_tokens=500,
+            )
+            plan = ai_helper.extract_json_from_response(resp)
+            return plan if isinstance(plan, dict) else None
+        except Exception as e:
+            log_task(task_id, "WARN", f"Chart plot-plan LLM failed: {e}")
+            return None
+
+    def _compute_series_from_rows(rows, plan: dict):
+        """Compute x/y or labels/values deterministically from rows based on a validated plan."""
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            return None
+
+        fields = set(rows[0].keys())
+        chart_type = str(plan.get("chart_type") or "").strip().lower()
+        x_field = plan.get("x_field")
+        y_field = plan.get("y_field")
+        group_by = plan.get("group_by")
+        aggregation = str(plan.get("aggregation") or "none").strip().lower()
+        bins = plan.get("bins")
+        x_label_plan = plan.get("x_label")
+        y_label_plan = plan.get("y_label")
+
+        def _field_ok(f):
+            return f is None or (isinstance(f, str) and f in fields)
+
+        if chart_type not in {"bar", "line", "scatter", "area", "pie", "histogram"}:
+            return None
+        if not _field_ok(x_field) or not _field_ok(y_field) or not _field_ok(group_by):
+            return None
+        if aggregation not in {"sum", "avg", "count", "none"}:
+            return None
+
+        # Histogram: pick a numeric field, return values.
+        if chart_type == "histogram":
+            if not isinstance(y_field, str):
+                return None
+            values = []
+            for r in rows:
+                try:
+                    values.append(float(r.get(y_field)))
+                except Exception:
+                    continue
+            if not values:
+                return None
+            return {
+                "chart_type": chart_type,
+                "values": values,
+                "bins": bins,
+                "x_label": (x_label_plan or y_field),
+                "y_label": (y_label_plan or "Frequency"),
+            }
+
+        # If no grouping/aggregation requested, just extract x/y point-wise.
+        if aggregation == "none" or group_by is None:
+            if not isinstance(y_field, str):
+                return None
+            x_out = []
+            y_out = []
+            for idx, r in enumerate(rows):
+                try:
+                    yv = float(r.get(y_field))
+                except Exception:
+                    continue
+
+                if isinstance(x_field, str):
+                    xv = r.get(x_field)
+                    try:
+                        xv = float(xv)
+                    except Exception:
+                        xv = str(xv)
+                else:
+                    xv = idx + 1
+
+                x_out.append(xv)
+                y_out.append(yv)
+
+            if not x_out or not y_out:
+                return None
+            return {
+                "chart_type": chart_type,
+                "x": x_out,
+                "y": y_out,
+                "x_label": (x_label_plan or (x_field or "Index")),
+                "y_label": (y_label_plan or y_field),
+            }
+
+        # Grouping + aggregation.
+        # For count, y_field can be null.
+        if not isinstance(group_by, str):
+            return None
+
+        grouped_sum = defaultdict(float)
+        grouped_count = defaultdict(int)
+
+        for r in rows:
+            key = r.get(group_by)
+            key = str(key)
+            if aggregation == "count":
+                grouped_count[key] += 1
+                continue
+            if not isinstance(y_field, str):
+                return None
+            try:
+                yv = float(r.get(y_field))
+            except Exception:
+                continue
+            grouped_sum[key] += yv
+            grouped_count[key] += 1
+
+        if not grouped_count:
+            return None
+
+        keys_sorted = sorted(grouped_count.keys())
+        if aggregation == "count":
+            vals = [float(grouped_count[k]) for k in keys_sorted]
+            y_name = (y_label_plan or f"Count")
+        elif aggregation == "avg":
+            vals = [float(grouped_sum[k] / grouped_count[k]) for k in keys_sorted if grouped_count[k] > 0]
+            keys_sorted = [k for k in keys_sorted if grouped_count[k] > 0]
+            y_name = (y_label_plan or f"Avg {y_field}")
+        else:  # sum
+            vals = [float(grouped_sum[k]) for k in keys_sorted]
+            y_name = (y_label_plan or f"Sum {y_field}")
+
+        if not keys_sorted or not vals:
+            return None
+
+        if chart_type == "pie":
+            return {
+                "chart_type": "pie",
+                "labels": keys_sorted,
+                "values": vals,
+                "x_label": "",
+                "y_label": "",
+            }
+
+        # For grouped bar/line/area: x is categorical
+        return {
+            "chart_type": chart_type,
+            "x": keys_sorted,
+            "y": vals,
+            "x_label": (x_label_plan or group_by),
+            "y_label": y_name,
+        }
+
     # 1) Prefer explicit structured payload
     title = payload.get("title")
     chart_type = payload.get("type")
@@ -969,6 +1159,31 @@ def run_chart(task_id, job_id, payload):
         parsed = _try_parse_json_or_csv_text(text)
         if parsed is not None:
             data_obj = parsed
+
+    # If we have structured rows but don't yet have a usable series, ask LLM for a plot PLAN (fields/aggregation)
+    # and then compute x/y deterministically from the actual rows.
+    if isinstance(data_obj, list) and data_obj and isinstance(data_obj[0], dict):
+        needs_series = (not isinstance(x, list) or not isinstance(y, list) or not x or not y) and not (
+            isinstance(labels, list) and isinstance(values, list) and labels and values
+        )
+        if needs_series:
+            plan = _llm_plot_plan_from_rows(data_obj, preferred_type=chart_type, title_hint=title, text_hint=text)
+            if plan:
+                computed = _compute_series_from_rows(data_obj, plan)
+                if computed:
+                    chart_type = chart_type or computed.get("chart_type")
+                    if computed.get("chart_type") == "pie":
+                        labels = labels or computed.get("labels")
+                        values = values or computed.get("values")
+                    elif computed.get("chart_type") == "histogram":
+                        values = values or computed.get("values")
+                        if computed.get("bins") is not None and payload.get("bins") is None:
+                            payload["bins"] = computed.get("bins")
+                    else:
+                        x = x or computed.get("x")
+                        y = y or computed.get("y")
+                    x_label = x_label or computed.get("x_label") or ""
+                    y_label = y_label or computed.get("y_label") or ""
 
     if (not isinstance(x, list) or not isinstance(y, list) or not x or not y) and isinstance(data_obj, list):
         x_field = payload.get("x_field") or payload.get("xKey") or payload.get("xKeyField")
