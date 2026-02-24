@@ -621,38 +621,59 @@ def run_designer(task_id, job_id, payload):
         log_task(task_id, "INFO", f"PDF uploaded to {object_key}")
         
         # Construct PDF download URL for template resolution
-        # The artifact will be available at the artifacts endpoint by job_id
         pdf_download_url = f"/api/jobs/{job_id}/artifacts?type=pdf&role=report&download=1"
         
-        # Report back to orchestrator
-        requests.post(
-            f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
-            json={
-                "result": {
-                    "ok": True,
-                    "job_id": job_id,
-                    "executor": "designer",
-                    "pdf_url": pdf_download_url,  # CRITICAL: for template {{tasks.designer.outputs.pdf_url}}
-                    "storage_key": object_key,
-                },
-                "artifact": {
-                    "type": "pdf",
-                    "filename": "report.pdf",
-                    "storage_key": object_key,
-                    "role": role,  # Phase 8.4.2: Mandatory role for designer
-                    "metadata": {
-                        "pages": None,
-                        "embedded_artifacts": artifact_refs_count,
-                        "section_count": len(sections),
-                        "role": role,
-                        "deterministic_ordering": True
-                        ,
-                        "latex": latex_metadata
-                    }
-                }
+        # Report back to orchestrator with retry logic
+        completion_payload = {
+            "result": {
+                "ok": True,
+                "job_id": job_id,
+                "executor": "designer",
+                "pdf_url": pdf_download_url,
+                "storage_key": object_key,
             },
-            timeout=5,
-        )
+            "artifact": {
+                "type": "pdf",
+                "filename": "report.pdf",
+                "storage_key": object_key,
+                "role": role,
+                "metadata": {
+                    "pages": None,
+                    "embedded_artifacts": artifact_refs_count,
+                    "section_count": len(sections),
+                    "role": role,
+                    "deterministic_ordering": True,
+                    "latex": latex_metadata
+                }
+            }
+        }
+        
+        # Retry completion up to 3 times
+        completion_success = False
+        for attempt in range(3):
+            try:
+                resp = requests.post(
+                    f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
+                    json=completion_payload,
+                    timeout=10
+                )
+                if resp.status_code == 200:
+                    log_task(task_id, "INFO", f"Completion acknowledged: {resp.json()}")
+                    completion_success = True
+                    break
+                else:
+                    log_task(task_id, "WARN", f"Completion HTTP {resp.status_code}: {resp.text[:200]}")
+                    if resp.status_code == 409:
+                        completion_success = True
+                        break
+            except Exception as e:
+                log_task(task_id, "WARN", f"Completion attempt {attempt+1} failed: {e}")
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+        
+        if not completion_success:
+            log_task(task_id, "ERROR", "Failed to report completion after all retries")
+            raise RuntimeError("Failed to report task completion")
         
         worker_tasks_total.labels(result="success").inc()
         log_task(task_id, "INFO", f"Designer execution succeeded, role='{role}', sections={len(sections)}")

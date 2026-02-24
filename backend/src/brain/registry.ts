@@ -68,6 +68,7 @@ export const AGENT_REGISTRY: AgentCapability[] = [
         outputs: [
             { name: "valid", type: "boolean", description: "Validation result" },
             { name: "errors", type: "array", description: "List of validation errors" },
+            { name: "data", type: "json", description: "Validated data (pass-through)" },
         ],
     },
     {
