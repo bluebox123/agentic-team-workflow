@@ -817,8 +817,7 @@ def run_chart(task_id, job_id, payload):
     import io
     import matplotlib.pyplot as plt
     import re
-    import random
-    import math
+    import csv
 
     def _sanitize_unresolved_templates(obj):
         """Replace unresolved {{...}} templates with safe defaults so charts don't fail/DLQ."""
@@ -838,9 +837,18 @@ def run_chart(task_id, job_id, payload):
     payload_str = json.dumps(payload)
     unresolved = re.findall(r'\{\{[^}]+\}\}', payload_str)
     if unresolved:
-        warn_msg = f"Chart payload contains unresolved templates: {unresolved}. Using safe defaults."
-        log_task(task_id, "WARN", warn_msg)
-        payload = _sanitize_unresolved_templates(payload)
+        warn_msg = f"Chart payload contains unresolved templates: {unresolved}. Failing chart generation to avoid inaccurate output."
+        log_task(task_id, "ERROR", warn_msg)
+        try:
+            requests.post(
+                f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/fail",
+                json={"error": warn_msg},
+                timeout=5,
+            )
+        except Exception as e:
+            log_task(task_id, "ERROR", f"Failed to report chart failure: {e}")
+        worker_tasks_total.labels(result="failed").inc()
+        return
 
     def _coerce_number_list(v):
         if v is None:
@@ -865,74 +873,80 @@ def run_chart(task_id, job_id, payload):
             return [str(x) for x in v]
         return []
 
-    def _extract_chart_spec_from_text(text: str) -> dict:
-        """Use LLM (Perplexity/SambaNova) to extract a chart spec from natural language."""
-        prompt = f"""You are a data visualization assistant.
-
-Given the user's text, produce a JSON object describing a single chart to generate.
-
-Rules:
-- Output MUST be strict JSON (no markdown).
-- Choose a chartType from: line, bar, scatter, area, pie, histogram.
-- Provide a short title.
-- Provide xLabel and yLabel when relevant.
-- Provide role: a short snake_case string.
-
-Data rules:
-- If the text contains explicit numeric pairs/series, extract them into x and y arrays.
-- If the text does NOT contain explicit usable numeric data, create a small plausible synthetic dataset (5-12 points) consistent with the topic (e.g. time series, category comparison).
-- For pie, provide labels and values arrays.
-- For histogram, provide values array.
-
-Return schema (only include fields needed for chartType):
-{{
-  "chartType": "line"|"bar"|"scatter"|"area"|"pie"|"histogram",
-  "title": string,
-  "role": string,
-  "xLabel": string,
-  "yLabel": string,
-  "x": number[],
-  "y": number[],
-  "labels": string[],
-  "values": number[],
-  "bins": number
-}}
-
-User text:
-{text}
-"""
+    def _try_parse_json_or_csv_text(text: str):
+        if not isinstance(text, str):
+            return None
+        s = text.strip()
+        if not s:
+            return None
+        try:
+            return json.loads(s)
+        except Exception:
+            pass
 
         try:
-            resp = ai_helper.generate_ai_response(
-                prompt,
-                task_type="chart",
-                temperature=0.2,
-                max_tokens=600,
-            )
-            parsed = ai_helper.extract_json_from_response(resp)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception as e:
-            log_task(task_id, "WARN", f"Chart LLM extraction failed: {e}")
-        return {}
+            snip = s[:50_000]
+            reader = csv.DictReader(io.StringIO(snip))
+            rows = list(reader)
+            if rows:
+                return rows
+        except Exception:
+            pass
 
-    def _default_synthetic_series(topic: str) -> tuple[list, list, str, str, str]:
-        """Fallback when we don't have data. Produce a plausible (x,y) series."""
-        base_title = (topic or "Synthetic Trend").strip()
-        title = base_title[:80] if base_title else "Synthetic Trend"
-        x_label = "Period"
-        y_label = "Index"
-        # Deterministic-ish by seeding from topic
-        seed = sum(ord(c) for c in (topic or "")) % 10_000
-        random.seed(seed)
-        n = random.randint(6, 10)
-        x = list(range(1, n + 1))
-        slope = random.uniform(0.5, 3.0)
-        noise = random.uniform(0.3, 1.2)
-        y0 = random.uniform(5, 20)
-        y = [max(0.0, y0 + slope * i + random.uniform(-noise, noise)) for i in range(n)]
-        role = "auto_chart"
-        return x, y, title, x_label, y_label, role
+        return None
+
+    def _extract_xy_from_rows(rows, x_field=None, y_field=None):
+        if not isinstance(rows, list) or not rows:
+            return [], [], "", ""
+        if not isinstance(rows[0], dict):
+            return [], [], "", ""
+
+        fields = list(rows[0].keys())
+        xf = x_field if x_field in fields else None
+        yf = y_field if y_field in fields else None
+
+        numeric_fields = []
+        for f in fields:
+            if f == xf:
+                continue
+            for r in rows[:25]:
+                v = r.get(f)
+                try:
+                    float(v)
+                    numeric_fields.append(f)
+                    break
+                except Exception:
+                    continue
+
+        if yf is None and numeric_fields:
+            yf = numeric_fields[0]
+
+        x_out = []
+        y_out = []
+
+        for idx, r in enumerate(rows):
+            if yf is None:
+                break
+            try:
+                yv = r.get(yf)
+                yv = float(yv)
+            except Exception:
+                continue
+
+            if xf is not None:
+                xv = r.get(xf)
+                try:
+                    xv_num = float(xv)
+                    xv = xv_num
+                except Exception:
+                    xv = str(xv)
+            else:
+                xv = idx + 1
+
+            x_out.append(xv)
+            y_out.append(yv)
+
+        return x_out, y_out, (xf or "Index"), (yf or "Value")
 
     # 1) Prefer explicit structured payload
     title = payload.get("title")
@@ -944,29 +958,30 @@ User text:
     x_label = payload.get("x_label", "")
     y_label = payload.get("y_label", "")
 
-    # 2) If missing/invalid, try to infer from text/goal
-    # (Backwards compatible: doesn't require registry change)
-    if not title or not chart_type or (not x and not labels and not values):
-        text = payload.get("text") or payload.get("goal") or payload.get("prompt")
-        if isinstance(text, str) and text.strip():
-            spec = _extract_chart_spec_from_text(text)
-            if spec:
-                title = title or spec.get("title")
-                chart_type = chart_type or spec.get("chartType")
-                x_label = x_label or spec.get("xLabel", "")
-                y_label = y_label or spec.get("yLabel", "")
-                # Prefer explicit role if provided by orchestrator payload
-                if not payload.get("role") and spec.get("role"):
-                    payload["role"] = spec.get("role")
-                x = x or spec.get("x")
-                y = y or spec.get("y")
-                labels = labels or spec.get("labels")
-                values = values or spec.get("values")
-                if not payload.get("bins") and spec.get("bins"):
-                    payload["bins"] = spec.get("bins")
+    # 2) Try to extract real data from payload.data or payload.text (JSON/CSV)
+    data_obj = payload.get("data")
+    text = payload.get("text") or payload.get("goal") or payload.get("prompt")
+    if isinstance(data_obj, str):
+        parsed = _try_parse_json_or_csv_text(data_obj)
+        if parsed is not None:
+            data_obj = parsed
+    if data_obj is None and isinstance(text, str):
+        parsed = _try_parse_json_or_csv_text(text)
+        if parsed is not None:
+            data_obj = parsed
+
+    if (not isinstance(x, list) or not isinstance(y, list) or not x or not y) and isinstance(data_obj, list):
+        x_field = payload.get("x_field") or payload.get("xKey") or payload.get("xKeyField")
+        y_field = payload.get("y_field") or payload.get("yKey") or payload.get("yKeyField")
+        x_ex, y_ex, xl_ex, yl_ex = _extract_xy_from_rows(data_obj, x_field=x_field, y_field=y_field)
+        if x_ex and y_ex:
+            x = x or x_ex
+            y = y or y_ex
+            x_label = x_label or xl_ex
+            y_label = y_label or yl_ex
 
     title = title or "Chart"
-    chart_type = (chart_type or "bar").lower()
+    chart_type = (chart_type or "").lower().strip()
     x = x if isinstance(x, list) else []
     y = y if isinstance(y, list) else []
     labels = labels if isinstance(labels, list) else []
@@ -977,49 +992,51 @@ User text:
     y_num = _coerce_number_list(y)
     values_num = _coerce_number_list(values)
     labels_str = _coerce_label_list(labels)
+    x_cat = [str(v) for v in x] if isinstance(x, list) else []
 
-    # 4) Last-resort synthetic data if none usable
+    # 4) Select chart type (if not explicitly provided) based on available data
+    if not chart_type:
+        if labels_str and values_num and len(labels_str) == len(values_num):
+            chart_type = "bar"
+        elif values_num and not (x_num and y_num):
+            chart_type = "histogram"
+        elif x_num and y_num and len(x_num) == len(y_num):
+            chart_type = "line"
+        else:
+            chart_type = "bar"
+
+    # 5) Validate we have real data for the chosen chart type
+    error_msg = ""
     if chart_type in ("pie",):
         if not labels_str or not values_num or len(labels_str) != len(values_num):
-            topic = payload.get("title") or payload.get("text") or "Categories"
-            # Create descriptive labels based on topic
-            seed = sum(ord(c) for c in str(topic)) % 10_000
-            random.seed(seed)
-            
-            # Generate meaningful category labels
-            common_categories = [
-                ["Category A", "Category B", "Category C", "Category D", "Category E"],
-                ["Segment 1", "Segment 2", "Segment 3", "Segment 4", "Segment 5"],
-                ["Group A", "Group B", "Group C", "Group D", "Other"],
-                ["High", "Medium-High", "Medium", "Medium-Low", "Low"],
-                ["Type I", "Type II", "Type III", "Type IV", "Type V"],
-            ]
-            labels_str = random.choice(common_categories)
-            
-            raw = [random.uniform(15, 45) for _ in labels_str]
-            total = sum(raw)
-            values_num = [round(v / total * 100, 1) for v in raw]
-            x_label = x_label or ""
-            y_label = y_label or ""
+            error_msg = "Pie chart requires 'labels' and 'values' arrays of equal length."
     elif chart_type in ("histogram",):
         if not values_num:
-            topic = payload.get("title") or payload.get("text") or "Distribution"
-            seed = sum(ord(c) for c in str(topic)) % 10_000
-            random.seed(seed)
-            mu = random.uniform(30, 70)
-            sigma = random.uniform(5, 15)
-            values_num = [max(0.0, random.gauss(mu, sigma)) for _ in range(120)]
-            x_label = x_label or "Value"
-            y_label = y_label or "Frequency"
+            error_msg = "Histogram requires a numeric 'values' array."
+    elif chart_type in ("bar",):
+        # Bar charts can support categorical x values.
+        if not y_num:
+            error_msg = "Bar chart requires a numeric 'y' array."
+        elif x_num and len(x_num) != len(y_num):
+            error_msg = "Bar chart requires 'x' and 'y' arrays of equal length."
+        elif (not x_num) and (not x_cat or len(x_cat) != len(y_num)):
+            error_msg = "Bar chart requires 'x' labels and numeric 'y' arrays of equal length."
     else:
         if not x_num or not y_num or len(x_num) != len(y_num):
-            topic = payload.get("title") or payload.get("text") or payload.get("goal") or "Trend"
-            x_num, y_num, synth_title, synth_x_label, synth_y_label, synth_role = _default_synthetic_series(str(topic))
-            title = title or synth_title
-            x_label = x_label or synth_x_label
-            y_label = y_label or synth_y_label
-            if not payload.get("role"):
-                payload["role"] = synth_role
+            error_msg = "Line/bar/scatter/area charts require numeric 'x' and 'y' arrays of equal length."
+
+    if error_msg:
+        log_task(task_id, "ERROR", f"Chart generation failed: {error_msg}")
+        try:
+            requests.post(
+                f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/fail",
+                json={"error": error_msg},
+                timeout=5,
+            )
+        except Exception as e:
+            log_task(task_id, "ERROR", f"Failed to report chart failure: {e}")
+        worker_tasks_total.labels(result="failed").inc()
+        return
     
     # Phase 8.4.2: Determine role with mapping and guardrail
     role = get_chart_role(payload)
@@ -1033,7 +1050,8 @@ User text:
     plt.figure(figsize=(8, 5))
 
     if chart_type == "bar":
-        bars = plt.bar([str(v) for v in x_num], y_num, color='steelblue', edgecolor='navy', alpha=0.8)
+        x_axis = [str(v) for v in x_num] if x_num else x_cat
+        bars = plt.bar(x_axis, y_num, color='steelblue', edgecolor='navy', alpha=0.8)
         # Add value labels on top of bars
         for bar in bars:
             height = bar.get_height()
@@ -1092,36 +1110,22 @@ User text:
     )
 
     # Phase 8.4.2: Include role in artifact metadata
-    data_points = len(x_num) if x_num else (len(values_num) if values_num else 0)
+    data_points = len(y_num) if chart_type in ("bar", "line", "scatter", "area") else (len(values_num) if values_num else 0)
     artifact_metadata = {
         "chart_type": chart_type,
         "data_points": data_points,
         "role": role  # Explicitly store role in metadata
     }
 
-    # Generate chart description/explanation
-    chart_description = ""
-    try:
-        desc_prompt = f"""Describe this chart in 1-2 sentences:
-
-Chart Type: {chart_type}
-Title: {title}
-X-axis: {x_label} (data points: {len(x_num) if x_num else 0})
-Y-axis: {y_label}
-Data: {str(x_num[:5]) if x_num else str(values_num[:5])}...
-
-Provide a brief, clear explanation of what this chart shows."""
-
-        chart_description = ai_helper.generate_ai_response(
-            desc_prompt,
-            task_type="chart",
-            temperature=0.4,
-            max_tokens=150,
-        )
-        log_task(task_id, "INFO", "Chart description generated")
-    except Exception as e:
-        log_task(task_id, "WARN", f"Chart description generation failed: {e}")
-        chart_description = f"{chart_type.capitalize()} chart showing {title.lower()}."
+    # Deterministic one-line description based on plotted data
+    if chart_type == "pie":
+        chart_description = f"Pie chart of {title} with {len(values_num)} categories."
+    elif chart_type == "histogram":
+        chart_description = f"Histogram of {title} showing distribution of {len(values_num)} values."
+    else:
+        xl = (x_label or ("Index" if x_num else "Category") or "x").strip() or "x"
+        yl = (y_label or "y").strip() or "y"
+        chart_description = f"{chart_type.capitalize()} chart of {yl} vs {xl} using {data_points} data points."
 
     requests.post(
         f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
@@ -1995,9 +1999,40 @@ def run_notifier(task_id, job_id, payload):
     if channel != "email":
         log_task(task_id, "WARN", f"Notifier channel '{channel}' not supported; only 'email' is implemented")
 
+    # Accept common manual formats for recipients:
+    # - JSON array string: "[\"a@b.com\", \"c@d.com\"]"
+    # - bracketed: "[a@b.com]"
+    # - comma/semicolon/newline separated: "a@b.com, c@d.com"
+    # - single email: "a@b.com"
+    if isinstance(recipients, str):
+        raw = recipients.strip()
+        parsed_list = None
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    parsed_list = parsed
+                elif isinstance(parsed, str):
+                    parsed_list = [parsed]
+            except Exception:
+                parsed_list = None
+
+        if parsed_list is None:
+            # Strip surrounding brackets/quotes if user typed something like [a@b.com]
+            cleaned = raw
+            if cleaned.startswith("[") and cleaned.endswith("]"):
+                cleaned = cleaned[1:-1]
+            cleaned = cleaned.replace("\r", "\n")
+            parts = re.split(r"[\n,;]+", cleaned)
+            parsed_list = [p.strip().strip('"').strip("'") for p in parts if p and p.strip()]
+
+        recipients = parsed_list
+
     if not isinstance(recipients, list):
-        log_task(task_id, "WARN", "Notifier recipients must be a list; coercing to empty list")
         recipients = []
+
+    # Final normalization: coerce to list[str], drop empties
+    recipients = [str(r).strip() for r in recipients if r is not None and str(r).strip()]
 
     results = []
     sent_count = 0
@@ -2178,6 +2213,11 @@ def run_scraper(task_id, job_id, payload):
     """Real web scraping with BeautifulSoup and AI-powered extraction"""
     url = payload.get("url", "")
     selector = payload.get("selector", "")
+    if isinstance(url, str):
+        url = url.strip()
+    else:
+        url = str(url).strip() if url is not None else ""
+    ok = False
     
     if not url:
         error_msg = "URL is required for scraping"
@@ -2241,6 +2281,7 @@ Provide a 2-3 sentence summary of what this webpage contains."""
                 "status": "completed",
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
             }
+            ok = True
             
         except requests.exceptions.RequestException as e:
             error_msg = f"Failed to fetch URL: {str(e)}"
@@ -2274,6 +2315,19 @@ Provide a 2-3 sentence summary of what this webpage contains."""
     # Pass full text to downstream agents via template resolution
     # This is what {{tasks.scraper.outputs.text}} will resolve to
     full_text_for_output = scraped_data.get("text", "") or "\n".join(scraped_data.get("sample_data", []))
+    if not ok:
+        try:
+            requests.post(
+                f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/fail",
+                json={"error": scraped_data.get("error", "Scraper failed")},
+                timeout=5,
+            )
+        except Exception as e:
+            log_task(task_id, "ERROR", f"Failed to report scraper failure: {e}")
+        worker_tasks_total.labels(result="failed").inc()
+        log_task(task_id, "ERROR", f"Scraping failed for {url}")
+        return
+
     requests.post(
         f"{ORCHESTRATOR_URL}/internal/tasks/{task_id}/complete",
         json={

@@ -175,6 +175,29 @@ router.post("/tasks/:id/fail", async (req, res) => {
 
     await transitionTask(id, "FAILED", { source: "worker", error });
 
+    // Fail-fast: mark job FAILED and skip remaining runnable tasks so the workflow doesn't keep executing.
+    const { rows: jobRows } = await pool.query(
+      `SELECT job_id FROM tasks WHERE id = $1`,
+      [id]
+    );
+    const jobId = jobRows[0]?.job_id as string | undefined;
+    if (jobId) {
+      await pool.query(
+        `UPDATE jobs SET status = 'FAILED' WHERE id = $1`,
+        [jobId]
+      );
+
+      await pool.query(
+        `
+        UPDATE tasks
+        SET status = 'SKIPPED', finished_at = NOW()
+        WHERE job_id = $1
+          AND status IN ('PENDING','QUEUED')
+        `,
+        [jobId]
+      );
+    }
+
     // Push a copy of the failed task into the DLQ for inspection/recovery
     await sendToDLQ(id, { error });
 
