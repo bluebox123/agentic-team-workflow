@@ -49,6 +49,28 @@ router.post("/tasks/:id/complete", async (req, res) => {
 
     // ✅ NEW: persist artifact if present
     if (artifact) {
+      // Idempotency for deterministic artifacts (Phase 8.4):
+      // the DB enforces a unique constraint on (job_id, type, role) where role is not null.
+      // Workers may retry completion; if the artifact already exists we should not error.
+      if (artifact.role && result?.job_id) {
+        const { rows: existingRows } = await pool.query(
+          `
+          SELECT id
+          FROM artifacts
+          WHERE job_id = $1 AND type = $2 AND role = $3
+          LIMIT 1
+          `,
+          [result.job_id, artifact.type, artifact.role]
+        );
+
+        if (existingRows.length > 0) {
+          await transitionTask(id, "SUCCESS", { source: "worker", artifact_already_exists: true });
+          await handleTaskCompletion(id);
+          res.json({ ok: true, artifact_already_exists: true, artifact_id: existingRows[0].id });
+          return;
+        }
+      }
+
       await createArtifact({
         task_id: id,
         job_id: result?.job_id,
