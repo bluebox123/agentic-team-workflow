@@ -72,10 +72,25 @@ async function runMigrations() {
       `);
       console.log('✓ Tasks review decision constraint added');
     } catch (error) {
-      if (error.code === '23505') { // constraint already exists
+      // Postgres returns 42710 (duplicate_object) if a constraint with that name already exists.
+      // Some drivers/environments may surface different codes, so also handle by checking pg_constraint.
+      if (error && (error.code === '42710' || error.code === '23505')) {
         console.log('✓ Tasks review decision constraint already exists');
       } else {
-        throw error;
+        // Last resort: if the constraint exists, don't fail the deploy.
+        const exists = await pool.query(
+          `
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'review_decision_check'
+            LIMIT 1
+          `
+        );
+        if (exists.rowCount > 0) {
+          console.log('✓ Tasks review decision constraint already exists');
+        } else {
+          throw error;
+        }
       }
     }
 
