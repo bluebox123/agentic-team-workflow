@@ -886,7 +886,7 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                 </div>
 
                 <DialogFooter className="p-4 border-t shrink-0">
-                    {error && <span className="text-sm text-destructive mr-auto flex items-center self-center">{error}</span>}
+                    {error && <span className="text-sm text-red-600 dark:text-red-500 mr-auto flex items-center self-center">{error}</span>}
                     <Button variant="ghost" onClick={handleClose}>
                         {executingJob ? "Close & Reset" : "Cancel"}
                     </Button>

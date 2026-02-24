@@ -33,7 +33,7 @@ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1NTBlODQwMC1lMjliLTQxZDQtYTcxNi0
 ```
 
 ### Step 3: Run a sample prompt
-Copy any of the **8 sample prompts** below (replace `<your gmail>` with your actual Gmail address).
+Copy any of the **8 sample prompts** below.
 
 ---
 
@@ -42,7 +42,7 @@ Copy any of the **8 sample prompts** below (replace `<your gmail>` with your act
 These prompts are designed to trigger **4-6 agents** working together, producing downloadable artifacts and email notifications.
 
 ### Prompt 1 — Website → Summary → Insights → PDF Report → Email
-**Agents:** `scraper` + `summarizer` + `analyzer` + `designer` + `notifier`
+**Agents:** `scraper` + `summarizer` + `analyzer` + `chart` + `designer` + `notifier`
 
 ```
 Scrape this page: https://en.wikipedia.org/wiki/Taj_Mahal
@@ -50,12 +50,14 @@ Scrape this page: https://en.wikipedia.org/wiki/Taj_Mahal
 Then:
 1) Summarize the scraped text in ~180 words.
 2) Analyze the same text and extract 8 key insights + 5 key facts.
-3) Create a PDF report (title: "Taj Mahal Briefing") with sections:
+3) Create a simple chart (e.g., a bar chart of the top 8 keywords/themes mentioned) and include it in the report.
+4) Create a PDF report (title: "Taj Mahal Briefing") with sections:
    - Executive Summary (the summary)
    - Key Insights (bullet list)
    - Key Facts (table)
+   - Chart (embedded)
    - Source URL + scrape timestamp
-4) Email the final PDF report to: <your gmail>
+5) Email the final PDF report to: samarthsaxena53@gmail.com
 Use notifier channel=email, subject="Taj Mahal Briefing (PDF)".
 ```
 
@@ -79,11 +81,11 @@ Workflow:
 3) Analyze: identify best month, worst month, average sales, and trend statement.
 4) Create a line chart of sales by month (title "Monthly Sales").
 5) Generate a PDF report with: data quality, transformed table, analysis insights, embedded chart.
-6) Email the PDF to <your gmail> with subject "Sales report + chart".
+6) Email the PDF to samarthsaxena53@gmail.com with subject "Sales report + chart".
 ```
 
 ### Prompt 3 — Two Pages Comparison Report + Email
-**Agents:** `scraper` + `summarizer` + `analyzer` + `transformer` + `designer` + `notifier`
+**Agents:** `scraper` + `summarizer` + `analyzer` + `transformer` + `chart` + `designer` + `notifier`
 
 ```
 Scrape and compare these two pages:
@@ -97,9 +99,12 @@ Then:
 - Analyze differences: give a comparison matrix (scope, goals, typical methods, examples).
 - Transform the comparison into a clean JSON object AND a human-readable table.
 
+Also:
+- Create a chart that visualizes a key comparison (e.g., a bar chart of "methods count" or "example count" per page) and include it in the PDF.
+
 Finally:
 - Create a PDF report titled "AI vs ML: Comparison" including both summaries, the matrix/table, and the JSON.
-- Email the report to <your gmail> subject="AI vs ML comparison PDF".
+- Email the report to samarthsaxena53@gmail.com subject="AI vs ML comparison PDF".
 ```
 
 ### Prompt 4 — Data Cleanup Pipeline
@@ -121,7 +126,7 @@ Pipeline:
 3) Re-validate the cleaned data.
 4) Create a bar chart for cleaned scores (title "Cleaned Scores").
 5) Create a PDF report: validation errors, cleaned dataset, validation results, embedded chart.
-6) Email PDF to <your gmail> subject "Data cleanup report".
+6) Email PDF to samarthsaxena53@gmail.com subject "Data cleanup report".
 ```
 
 ### Prompt 5 — Research Digest with Chart
@@ -136,25 +141,26 @@ Then:
 3) Transform the categorized claims into counts per category.
 4) Create a pie chart of category distribution (title "Claim Categories").
 5) Produce a PDF report: summary, categorized claims list, counts table, pie chart.
-6) Email the final PDF to <your gmail> subject "Climate Change Digest PDF".
+6) Email the final PDF to samarthsaxena53@gmail.com subject "Climate Change Digest PDF".
 ```
 
 ### Prompt 6 — Simple One-Pager + PDF Attachment
-**Agents:** `scraper` + `summarizer` + `designer` + `notifier` (+ `analyzer`)
+**Agents:** `scraper` + `summarizer` + `chart` + `designer` + `notifier` (+ `analyzer`)
 
 ```
 Scrape https://en.wikipedia.org/wiki/India
 
 1) Summarize in 150 words.
-2) Create a PDF report titled "India One-Pager" containing: summary, 8 bullet facts, source URL.
-3) After the PDF is generated, send an email to <your gmail> with:
+2) Create a simple chart (e.g., pie chart of categories of the 8 facts: geography/economy/demographics/history) and include it in the PDF.
+3) Create a PDF report titled "India One-Pager" containing: summary, 8 bullet facts, the chart, source URL.
+4) After the PDF is generated, send an email to samarthsaxena53@gmail.com with:
    - subject "India One-Pager PDF"
    - message "Attached is the generated PDF report."
 Make sure notifier sends the PDF as an attachment.
 ```
 
 ### Prompt 7 — JSON Spec Validation and Reporting
-**Agents:** `validator` + `transformer` + `analyzer` + `designer` + `notifier`
+**Agents:** `validator` + `transformer` + `analyzer` + `chart` + `designer` + `notifier`
 
 ```
 You are given this JSON:
@@ -170,8 +176,9 @@ You are given this JSON:
 1) Validate it against schema: project=string, tasks=array of {id, agentType} with ≥3 items.
 2) Transform to add "taskCount" field and agentType frequencies.
 3) Analyze: identify missing recommended agents (e.g., notifier) and propose improvements.
-4) Generate a PDF report with: validation outcome, transformed JSON, recommendations.
-5) Email the PDF to <your gmail> subject "Workflow JSON validation report".
+4) Create a bar chart of agentType frequencies and include it in the report.
+5) Generate a PDF report with: validation outcome, transformed JSON, the chart, recommendations.
+6) Email the PDF to samarthsaxena53@gmail.com subject "Workflow JSON validation report".
 ```
 
 ### Prompt 8 — End-to-End KPI Report
@@ -193,7 +200,7 @@ Use this KPI dataset:
 2) Transform: add "conversionProxy" = signups/active for each day.
 3) Create combo visualization (line for active, bar for signups).
 4) Create PDF report "Weekly KPI Report" with insights, table, and chart(s).
-5) Email PDF to <your gmail> subject "Weekly KPI Report (PDF)".
+5) Email PDF to samarthsaxena53@gmail.com subject "Weekly KPI Report (PDF)".
 ```
 
 ---
@@ -255,7 +262,6 @@ User Prompt → Brain/Planner (LLM) → Workflow DAG → Orchestrator → Rabbit
 3. **Submit a prompt**:
    - Go to the **Brain Panel**
    - Paste one of the 8 sample prompts above
-   - Replace `<your gmail>` with your actual Gmail address
    - Click **Execute**
 
 4. **Monitor progress**:
