@@ -11,6 +11,8 @@ import { fetchArtifacts, fetchArtifactBlob, fetchArtifactText, type Artifact } f
 import { fetchLogs } from '../api/logs';
 import { Loader2, Play, Sparkles, Save, Trash2, Clock, CheckCircle, XCircle, AlertCircle, FileText, Activity, Download } from 'lucide-react';
 import type { WorkflowDAG } from '../api/brain';
+import { Input } from './ui/input';
+import { createWorkflowFromJob } from '../api/workflows';
 
 interface SavedPrompt {
     id: string;
@@ -38,6 +40,9 @@ export function BrainPanel() {
     const [plannedWorkflow, setPlannedWorkflow] = useState<WorkflowDAG | null>(null);
     const [isExecuting, setIsExecuting] = useState(false);
     const [executionStatus, setExecutionStatus] = useState<string | null>(null);
+
+    const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
+    const [saveTemplateError, setSaveTemplateError] = useState<string | null>(null);
 
     // Prompt History
     const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([]);
@@ -317,6 +322,30 @@ export function BrainPanel() {
         }
     };
 
+    const submitSaveTemplate = async (e: React.FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        if (!executingJob) return;
+        setSaveTemplateError(null);
+        try {
+            const form = e.currentTarget;
+            const name = (form.elements.namedItem('template_name') as HTMLInputElement).value;
+            const description = (form.elements.namedItem('template_description') as HTMLInputElement).value;
+            await createWorkflowFromJob({
+                jobId: executingJob.id,
+                name,
+                description: description || undefined,
+                prompt: prompt.trim() || undefined,
+                visualDag: plannedWorkflow ?? undefined,
+            });
+            setShowSaveTemplateModal(false);
+            setExecutionStatus('Saved as template!');
+            setTimeout(() => setExecutionStatus(null), 2000);
+        } catch (err) {
+            const msg = err && typeof err === 'object' && 'message' in err ? String((err as { message?: unknown }).message) : 'Failed to save template';
+            setSaveTemplateError(msg);
+        }
+    };
+
     return (
         <>
             <div className="grid gap-6 p-6 lg:grid-cols-[1fr_320px]">
@@ -448,6 +477,11 @@ export function BrainPanel() {
                                 </div>
                             </CardHeader>
                             <CardContent className="space-y-4">
+                                <div className="flex gap-2">
+                                    <Button variant="secondary" size="sm" onClick={() => { setSaveTemplateError(null); setShowSaveTemplateModal(true); }}>
+                                        <Save className="mr-2 h-4 w-4" /> Save as Template
+                                    </Button>
+                                </div>
                                 {plannedWorkflow && (
                                     <div className="rounded-md border bg-muted/20 p-3">
                                         <WorkflowVisualizer workflow={plannedWorkflow} taskStatusByName={taskStatusByName} />
@@ -621,6 +655,36 @@ export function BrainPanel() {
                                     {artifactText || "Loading..."}
                                 </pre>
                             )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showSaveTemplateModal && executingJob && (
+                <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6" onClick={() => setShowSaveTemplateModal(false)}>
+                    <div className="bg-card border shadow-2xl rounded-lg w-full max-w-md" onClick={e => e.stopPropagation()}>
+                        <div className="p-4 border-b">
+                            <div className="font-semibold">Save as Template</div>
+                            <div className="text-xs text-muted-foreground mt-1">Save this AI Creator job so it can be re-run from Templates.</div>
+                        </div>
+                        <div className="p-4">
+                            <form onSubmit={submitSaveTemplate} id="saveTemplateForm" className="space-y-4">
+                                <div className="space-y-2">
+                                    <div className="text-sm font-medium">Template name</div>
+                                    <Input name="template_name" required defaultValue={executingJob.title} />
+                                </div>
+                                <div className="space-y-2">
+                                    <div className="text-sm font-medium">Description</div>
+                                    <Input name="template_description" />
+                                </div>
+                                {saveTemplateError && (
+                                    <div className="text-sm text-destructive">{saveTemplateError}</div>
+                                )}
+                            </form>
+                        </div>
+                        <div className="p-4 border-t flex justify-end gap-2">
+                            <Button variant="ghost" onClick={() => setShowSaveTemplateModal(false)}>Cancel</Button>
+                            <Button type="submit" form="saveTemplateForm">Save</Button>
                         </div>
                     </div>
                 </div>

@@ -21,11 +21,14 @@ export interface WorkflowDetail extends WorkflowTemplate {
 export interface DagTask {
   name: string;
   parent_task_index?: number;
-  params?: Record<string, unknown>;
+  agent_type?: string;
+  payload?: Record<string, unknown>;
+  params?: Record<string, unknown>; // backwards-compat for older UI
 }
 
 export interface DagDefinition {
   tasks: DagTask[];
+  meta?: Record<string, unknown>;
 }
 
 export async function fetchWorkflows(): Promise<WorkflowTemplate[]> {
@@ -55,5 +58,16 @@ export async function createWorkflowVersion(templateId: string, payload: { dag: 
 
 export async function runWorkflow(templateId: string, payload: { version: number; title?: string; params?: Record<string, unknown> }): Promise<{ jobId: string; taskCount: number }> {
   const res = await api.post(`/workflows/${templateId}/run`, payload);
+  return res.data;
+}
+
+export async function createWorkflowFromJob(payload: {
+  jobId: string;
+  name: string;
+  description?: string;
+  prompt?: string;
+  visualDag?: unknown;
+}): Promise<{ templateId: string; version: number }> {
+  const res = await api.post("/workflows/from-job", payload);
   return res.data;
 }

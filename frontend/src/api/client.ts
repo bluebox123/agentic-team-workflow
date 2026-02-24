@@ -11,7 +11,7 @@ export const api = axios.create({
 
 // Add auth token to requests
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  const token = localStorage.getItem("token");
+  const token = localStorage.getItem("token")?.trim();
   if (token) {
     // Ensure headers object exists, then mutate it in a type-safe way
     config.headers = config.headers || {};

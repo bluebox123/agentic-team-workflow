@@ -143,6 +143,10 @@ function createS3Client(): S3Client | null {
 
   console.log(`[S3] Creating client for endpoint: ${fullEndpoint}`);
 
+  const shouldForcePathStyle =
+    !isSupabaseS3Endpoint(endpoint) &&
+    /^(localhost|127\.0\.0\.1)(:\d+)?(\/.*)?$/i.test(endpoint || "");
+
   return new S3Client({
     endpoint: fullEndpoint,
     region: process.env.MINIO_REGION || "us-east-1", // Default region for S3-compatible services
@@ -150,7 +154,9 @@ function createS3Client(): S3Client | null {
       accessKeyId: accessKey,
       secretAccessKey: secretKey,
     },
-    forcePathStyle: false, // Supabase uses virtual-hosted-style
+    // Local MinIO on localhost requires path-style, otherwise the SDK will try
+    // to resolve bucketname.localhost (e.g. artifacts.localhost) and fail DNS.
+    forcePathStyle: shouldForcePathStyle,
     requestHandler: new NodeHttpHandler({
       httpsAgent,
       requestTimeout: 30000,

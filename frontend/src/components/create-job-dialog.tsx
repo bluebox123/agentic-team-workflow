@@ -17,6 +17,39 @@ import { fetchLogs } from "../api/logs";
 import { cn } from "@/lib/utils";
 import { WorkflowBuilder, type WorkflowDAG as VisualWorkflowDAG } from "@/components/WorkflowBuilder";
 
+function JsonTextarea({ value, onChange, placeholder, className }: { value: unknown; onChange: (v: unknown) => void; placeholder?: string; className?: string }) {
+    const [text, setText] = useState(() => typeof value === 'string' ? value : JSON.stringify(value ?? {}, null, 2));
+
+    useEffect(() => {
+        try {
+            const parsed = JSON.parse(text);
+            if (JSON.stringify(parsed) !== JSON.stringify(value)) {
+                setText(JSON.stringify(value ?? {}, null, 2));
+            }
+        } catch {
+            // User is typing invalid JSON, let them type
+        }
+    }, [value, text]);
+
+    return (
+        <Textarea
+            value={text}
+            onChange={(e) => {
+                const newText = e.target.value;
+                setText(newText);
+                try {
+                    const parsed = JSON.parse(newText);
+                    onChange(parsed);
+                } catch {
+                    // Ignore parsing error, but don't call onChange until it's valid
+                }
+            }}
+            placeholder={placeholder}
+            className={className}
+        />
+    );
+}
+
 interface CreateJobDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -157,8 +190,8 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
 
     const workflowToTasks = useCallback((wf: VisualWorkflowDAG): BuilderTask[] => {
         const nodes = Array.isArray(wf.nodes) ? wf.nodes : [];
-        const order = Array.isArray((wf as any).executionOrder) && (wf as any).executionOrder.length > 0
-            ? (wf as any).executionOrder as string[]
+        const order = Array.isArray(wf.executionOrder) && wf.executionOrder.length > 0
+            ? wf.executionOrder
             : nodes.map(n => n.id);
 
         const nodeById = new Map(nodes.map(n => [n.id, n] as const));
@@ -167,9 +200,11 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
         const indexById = new Map(orderedNodes.map((n, idx) => [n.id, idx] as const));
 
         return orderedNodes.map((n) => {
-            const deps = Array.isArray((n as any).dependencies) ? (n as any).dependencies as string[] : [];
-            const parentId = deps[0];
-            const parentIndex = parentId ? indexById.get(parentId) : undefined;
+            const deps = Array.isArray(n.dependencies) ? n.dependencies : [];
+            const parentIndex = deps
+                .map((d) => indexById.get(d))
+                .filter((x): x is number => typeof x === 'number')
+                .reduce<number | undefined>((max, x) => (max === undefined || x > max ? x : max), undefined);
 
             const type = (n.agentType as TaskType) ?? "executor";
             return {
@@ -538,8 +573,8 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
 
                     {/* Main Content with Tabs */}
                     <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-                        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-                            <div className="border-b px-6 pt-4">
+                        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                            <div className="border-b px-6 pt-4 shrink-0">
                                 <TabsList className="bg-muted/50">
                                     <TabsTrigger value="list" className="gap-2" disabled={executingJob !== null}>
                                         <List className="w-4 h-4" />
@@ -558,181 +593,161 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                                 </TabsList>
                             </div>
 
-                            <TabsContent value="list" className="flex-1 flex flex-col overflow-hidden p-0 m-0">
-                                <div className="flex-1 overflow-y-auto p-6 pb-24">
+                            <TabsContent value="list" className="flex-1 min-h-0 data-[state=active]:flex flex-col overflow-hidden p-0 m-0">
+                                <div className="flex-1 min-h-0 overflow-y-auto p-6 pb-24">
                                     {tasks.length === 0 ? (
-                                    <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-60 border-2 border-dashed rounded-xl">
-                                        <Layers className="w-12 h-12 mb-4 text-slate-300 dark:text-slate-700" />
-                                        <p>Select a task from the library to start building</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4 max-w-2xl mx-auto">
-                                        <AnimatePresence mode="popLayout">
-                                            {tasks.map((task, index) => (
-                                                <motion.div
-                                                    layout
-                                                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
-                                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                                    exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-                                                    key={task.id}
-                                                    className="relative group"
-                                                >
-                                                    {index > 0 && (
-                                                        <div className="absolute -top-4 left-8 w-0.5 h-4 bg-border/50 -z-10" />
-                                                    )}
+                                        <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-60 border-2 border-dashed rounded-xl">
+                                            <Layers className="w-12 h-12 mb-4 text-slate-300 dark:text-slate-700" />
+                                            <p>Select a task from the library to start building</p>
+                                        </div>
+                                    ) : (
+                                        <div className="max-w-3xl mx-auto">
+                                            <AnimatePresence>
+                                                {tasks.map((task, index) => (
+                                                    <motion.div
+                                                        layout
+                                                        initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                                                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                        exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+                                                        key={task.id}
+                                                        className="relative group"
+                                                    >
+                                                        {index > 0 && (
+                                                            <div className="absolute -top-4 left-8 w-0.5 h-4 bg-border/50 -z-10" />
+                                                        )}
 
-                                                    <div className="absolute -left-3 top-6 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-muted-foreground">
-                                                        <GripVertical className="w-4 h-4" />
-                                                    </div>
-
-                                                    <Card className="p-4 border shadow-sm hover:shadow-md transition-shadow dark:bg-card">
-                                                        <div className="flex items-start justify-between gap-4 mb-4">
-                                                            <div className="flex items-center gap-3 flex-1">
-                                                                <div className={cn("p-2 rounded-md", task.type === 'reviewer' ? "bg-purple-500/10 text-purple-500" : "bg-blue-500/10 text-blue-500")}>
-                                                                    {task.type === 'reviewer' ? <CheckCircle className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
-                                                                </div>
-                                                                <Input
-                                                                    value={task.name}
-                                                                    onChange={(e) => updateTask(index, 'name', e.target.value)}
-                                                                    className="h-8 font-medium border-transparent hover:border-input focus:border-input transition-all w-full max-w-[200px]"
-                                                                />
-                                                                <Badge variant="outline" className="text-[10px] uppercase">{task.type}</Badge>
-                                                            </div>
-                                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => removeTask(index)}>
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </Button>
+                                                        <div className="absolute -left-3 top-6 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-muted-foreground">
+                                                            <GripVertical className="w-4 h-4" />
                                                         </div>
 
-                                                        <div className="pl-11 space-y-3">
-                                                            <div className="space-y-3">
-                                                                {(payloadSchemas[task.type] ?? []).map((field) => {
-                                                                    const rawValue = (task.payload as Record<string, unknown> | undefined)?.[field.key];
-                                                                    const label = field.required ? `${field.label} *` : field.label;
-
-                                                                    if (field.kind === "string") {
-                                                                        return (
-                                                                            <div key={field.key} className="space-y-1.5">
-                                                                                <Label className="text-xs text-muted-foreground">{label}</Label>
-                                                                                <Input
-                                                                                    value={typeof rawValue === "string" ? rawValue : (rawValue ?? "") as string}
-                                                                                    onChange={(e) => updateTask(index, "payload", e.target.value, field.key)}
-                                                                                    placeholder={field.placeholder}
-                                                                                    className="bg-muted/30"
-                                                                                />
-                                                                            </div>
-                                                                        );
-                                                                    }
-
-                                                                    if (field.kind === "number") {
-                                                                        const value = typeof rawValue === "number" ? String(rawValue) : (typeof rawValue === "string" ? rawValue : "");
-                                                                        return (
-                                                                            <div key={field.key} className="space-y-1.5">
-                                                                                <Label className="text-xs text-muted-foreground">{label}</Label>
-                                                                                <Input
-                                                                                    type="number"
-                                                                                    value={value}
-                                                                                    onChange={(e) => {
-                                                                                        const v = e.target.value;
-                                                                                        if (v === "") updateTask(index, "payload", "", field.key);
-                                                                                        else updateTask(index, "payload", Number(v), field.key);
-                                                                                    }}
-                                                                                    placeholder={field.placeholder}
-                                                                                    className="bg-muted/30"
-                                                                                />
-                                                                            </div>
-                                                                        );
-                                                                    }
-
-                                                                    if (field.kind === "string_array_comma") {
-                                                                        const value = Array.isArray(rawValue) ? (rawValue as unknown[]).map(String).join(", ") : (typeof rawValue === "string" ? rawValue : "");
-                                                                        return (
-                                                                            <div key={field.key} className="space-y-1.5">
-                                                                                <Label className="text-xs text-muted-foreground">{label}</Label>
-                                                                                <Input
-                                                                                    value={value}
-                                                                                    onChange={(e) => {
-                                                                                        const raw = e.target.value;
-                                                                                        const parsed = raw
-                                                                                            .split(",")
-                                                                                            .map(s => s.trim())
-                                                                                            .filter(Boolean);
-                                                                                        updateTask(index, "payload", parsed, field.key);
-                                                                                    }}
-                                                                                    placeholder={field.placeholder}
-                                                                                    className="bg-muted/30"
-                                                                                />
-                                                                            </div>
-                                                                        );
-                                                                    }
-
-                                                                    if (field.kind === "json") {
-                                                                        const value = typeof rawValue === "string"
-                                                                            ? rawValue
-                                                                            : (rawValue === undefined ? "" : JSON.stringify(rawValue, null, 2));
-
-                                                                        return (
-                                                                            <div key={field.key} className="space-y-1.5">
-                                                                                <Label className="text-xs text-muted-foreground">{label}</Label>
-                                                                                <Textarea
-                                                                                    value={value}
-                                                                                    onChange={(e) => {
-                                                                                        const t = e.target.value;
-                                                                                        try {
-                                                                                            const parsed = JSON.parse(t);
-                                                                                            updateTask(index, "payload", parsed, field.key);
-                                                                                        } catch {
-                                                                                            updateTask(index, "payload", t, field.key);
-                                                                                        }
-                                                                                    }}
-                                                                                    placeholder={field.placeholder}
-                                                                                    className="min-h-[80px] bg-muted/30 font-mono text-xs"
-                                                                                />
-                                                                            </div>
-                                                                        );
-                                                                    }
-
-                                                                    return null;
-                                                                })}
-
-                                                                <div className="pt-2">
-                                                                    <Label className="text-xs text-muted-foreground">Advanced Payload (JSON)</Label>
-                                                                    <Textarea
-                                                                        value={JSON.stringify(task.payload ?? {}, null, 2)}
-                                                                        onChange={(e) => {
-                                                                            const t = e.target.value;
-                                                                            try {
-                                                                                const parsed = JSON.parse(t);
-                                                                                updateTask(index, "payload", parsed);
-                                                                            } catch {
-                                                                                updateTask(index, "payload", task.payload ?? {});
-                                                                            }
-                                                                        }}
-                                                                        className="mt-1.5 min-h-[120px] bg-muted/30 font-mono text-xs"
+                                                        <Card className="p-4 border shadow-sm hover:shadow-md transition-shadow dark:bg-card">
+                                                            <div className="flex items-start justify-between gap-4 mb-4">
+                                                                <div className="flex items-center gap-3 flex-1">
+                                                                    <div className={cn("p-2 rounded-md", task.type === 'reviewer' ? "bg-purple-500/10 text-purple-500" : "bg-blue-500/10 text-blue-500")}>
+                                                                        {task.type === 'reviewer' ? <CheckCircle className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
+                                                                    </div>
+                                                                    <Input
+                                                                        value={task.name}
+                                                                        onChange={(e) => updateTask(index, 'name', e.target.value)}
+                                                                        className="h-8 font-medium border-transparent hover:border-input focus:border-input transition-all w-full max-w-[200px]"
                                                                     />
+                                                                    <Badge variant="outline" className="text-[10px] uppercase">{task.type}</Badge>
+                                                                </div>
+                                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => removeTask(index)}>
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </Button>
+                                                            </div>
+
+                                                            <div className="pl-11 space-y-3">
+                                                                <div className="space-y-3">
+                                                                    {(payloadSchemas[task.type] ?? []).map((field) => {
+                                                                        const rawValue = (task.payload as Record<string, unknown> | undefined)?.[field.key];
+                                                                        const label = field.required ? `${field.label} *` : field.label;
+
+                                                                        if (field.kind === "string") {
+                                                                            return (
+                                                                                <div key={field.key} className="space-y-1.5">
+                                                                                    <Label className="text-xs text-muted-foreground">{label}</Label>
+                                                                                    <Input
+                                                                                        value={typeof rawValue === "string" ? rawValue : (rawValue ?? "") as string}
+                                                                                        onChange={(e) => updateTask(index, "payload", e.target.value, field.key)}
+                                                                                        placeholder={field.placeholder}
+                                                                                        className="bg-muted/30"
+                                                                                    />
+                                                                                </div>
+                                                                            );
+                                                                        }
+
+                                                                        if (field.kind === "number") {
+                                                                            const value = typeof rawValue === "number" ? String(rawValue) : (typeof rawValue === "string" ? rawValue : "");
+                                                                            return (
+                                                                                <div key={field.key} className="space-y-1.5">
+                                                                                    <Label className="text-xs text-muted-foreground">{label}</Label>
+                                                                                    <Input
+                                                                                        type="number"
+                                                                                        value={value}
+                                                                                        onChange={(e) => {
+                                                                                            const v = e.target.value;
+                                                                                            if (v === "") updateTask(index, "payload", "", field.key);
+                                                                                            else updateTask(index, "payload", Number(v), field.key);
+                                                                                        }}
+                                                                                        placeholder={field.placeholder}
+                                                                                        className="bg-muted/30"
+                                                                                    />
+                                                                                </div>
+                                                                            );
+                                                                        }
+
+                                                                        if (field.kind === "string_array_comma") {
+                                                                            const value = Array.isArray(rawValue) ? (rawValue as unknown[]).map(String).join(", ") : (typeof rawValue === "string" ? rawValue : "");
+                                                                            return (
+                                                                                <div key={field.key} className="space-y-1.5">
+                                                                                    <Label className="text-xs text-muted-foreground">{label}</Label>
+                                                                                    <Input
+                                                                                        value={value}
+                                                                                        onChange={(e) => {
+                                                                                            const raw = e.target.value;
+                                                                                            const parsed = raw
+                                                                                                .split(",")
+                                                                                                .map(s => s.trim())
+                                                                                                .filter(Boolean);
+                                                                                            updateTask(index, "payload", parsed, field.key);
+                                                                                        }}
+                                                                                        placeholder={field.placeholder}
+                                                                                        className="bg-muted/30"
+                                                                                    />
+                                                                                </div>
+                                                                            );
+                                                                        }
+
+                                                                        if (field.kind === "json") {
+                                                                            return (
+                                                                                <div key={field.key} className="space-y-1.5">
+                                                                                    <Label className="text-xs text-muted-foreground">{label}</Label>
+                                                                                    <JsonTextarea
+                                                                                        value={rawValue}
+                                                                                        onChange={(v) => updateTask(index, "payload", v, field.key)}
+                                                                                        placeholder={field.placeholder}
+                                                                                        className="min-h-[80px] bg-muted/30 font-mono text-xs"
+                                                                                    />
+                                                                                </div>
+                                                                            );
+                                                                        }
+
+                                                                        return null;
+                                                                    })}
+
+                                                                    <div className="pt-2">
+                                                                        <Label className="text-xs text-muted-foreground">Advanced Payload (JSON)</Label>
+                                                                        <JsonTextarea
+                                                                            value={task.payload ?? {}}
+                                                                            onChange={(v) => updateTask(index, "payload", v)}
+                                                                            className="mt-1.5 min-h-[120px] bg-muted/30 font-mono text-xs"
+                                                                        />
+                                                                    </div>
                                                                 </div>
                                                             </div>
-                                                        </div>
-                                                    </Card>
-                                                </motion.div>
-                                            ))}
-                                        </AnimatePresence>
+                                                        </Card>
+                                                    </motion.div>
+                                                ))}
+                                            </AnimatePresence>
 
-                                        <motion.div
-                                            initial={{ opacity: 0 }}
-                                            animate={{ opacity: 1 }}
-                                            className="flex justify-center pt-4 pb-12"
-                                        >
-                                            <div className="w-8 h-8 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center text-muted-foreground/30">
-                                                <Plus className="w-4 h-4" />
-                                            </div>
-                                        </motion.div>
-                                    </div>
-                                )}
+                                            <motion.div
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: 1 }}
+                                                className="flex justify-center pt-4 pb-12"
+                                            >
+                                                <div className="w-8 h-8 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center text-muted-foreground/30">
+                                                    <Plus className="w-4 h-4" />
+                                                </div>
+                                            </motion.div>
+                                        </div>
+                                    )}
                                 </div>
                             </TabsContent>
 
-                            <TabsContent value="visual" className="flex-1 overflow-hidden p-6 m-0 min-h-0">
-                                <div className="h-full">
+                            <TabsContent value="visual" className="flex-1 overflow-hidden p-6 m-0 min-h-0 data-[state=active]:flex flex-col">
+                                <div className="flex-1 min-h-0">
                                     <WorkflowBuilder
                                         workflow={visualWorkflow}
                                         mode="build"
@@ -752,123 +767,125 @@ export function CreateJobDialog({ open, onOpenChange, onSuccess }: CreateJobDial
                             </TabsContent>
 
                             {/* Execution Tab - Same as BrainPanel */}
-                            <TabsContent value="execution" className="flex-1 overflow-y-auto p-6 m-0">
-                                {executingJob && (
-                                    <div className="space-y-6">
-                                        {/* Job Status Header */}
-                                        <Card className="border-l-4 border-l-indigo-500 shadow-lg">
-                                            <CardHeader className="pb-3">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2 text-lg font-semibold">
-                                                        {executingJob.status === 'RUNNING' && <Activity className="h-5 w-5 text-blue-500 animate-pulse" />}
-                                                        {executingJob.status === 'SUCCESS' && <CheckCircle className="h-5 w-5 text-green-500" />}
-                                                        {executingJob.status === 'FAILED' && <XCircle className="h-5 w-5 text-red-500" />}
-                                                        {executingJob.status === 'PENDING' && <AlertCircle className="h-5 w-5 text-yellow-500" />}
-                                                        Job: {executingJob.title}
-                                                    </div>
-                                                    <Badge
-                                                        variant={
-                                                            executingJob.status === 'SUCCESS' ? 'default' :
-                                                                executingJob.status === 'FAILED' ? 'destructive' :
-                                                                    'secondary'
-                                                        }
-                                                        className={
-                                                            executingJob.status === 'SUCCESS' ? 'bg-green-600' :
-                                                                executingJob.status === 'RUNNING' ? 'bg-blue-500' :
-                                                                    ''
-                                                        }
-                                                    >
-                                                        {executingJob.status}
-                                                    </Badge>
-                                                </div>
-                                            </CardHeader>
-                                        </Card>
-
-                                        {/* Tasks */}
-                                        {jobTasks.length > 0 && (
-                                            <Card>
+                            <TabsContent value="execution" className="flex-1 overflow-hidden m-0 data-[state=active]:flex flex-col">
+                                <div className="flex-1 min-h-0 overflow-y-auto p-6">
+                                    {executingJob && (
+                                        <div className="space-y-6">
+                                            {/* Job Status Header */}
+                                            <Card className="border-l-4 border-l-indigo-500 shadow-lg">
                                                 <CardHeader className="pb-3">
-                                                    <div className="flex items-center gap-2 text-sm font-semibold">
-                                                        <Activity className="h-4 w-4" />
-                                                        Tasks ({jobTasks.filter(t => t.status === 'SUCCESS').length}/{jobTasks.length} completed)
-                                                    </div>
-                                                </CardHeader>
-                                                <div className="p-4 pt-0 space-y-2">
-                                                    {jobTasks.map(task => (
-                                                        <div key={task.id} className="flex items-center gap-2 p-2 rounded bg-muted/50">
-                                                            {task.status === 'SUCCESS' && <CheckCircle className="h-4 w-4 text-green-500" />}
-                                                            {task.status === 'FAILED' && <XCircle className="h-4 w-4 text-red-500" />}
-                                                            {task.status === 'RUNNING' && <Activity className="h-4 w-4 text-blue-500 animate-pulse" />}
-                                                            {task.status === 'PENDING' && <Clock className="h-4 w-4 text-gray-400" />}
-                                                            <span className="text-sm font-medium">{task.name}</span>
-                                                            <Badge variant="outline" className="text-[10px] ml-auto">{task.status}</Badge>
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-2 text-lg font-semibold">
+                                                            {executingJob.status === 'RUNNING' && <Activity className="h-5 w-5 text-blue-500 animate-pulse" />}
+                                                            {executingJob.status === 'SUCCESS' && <CheckCircle className="h-5 w-5 text-green-500" />}
+                                                            {executingJob.status === 'FAILED' && <XCircle className="h-5 w-5 text-red-500" />}
+                                                            {executingJob.status === 'PENDING' && <AlertCircle className="h-5 w-5 text-yellow-500" />}
+                                                            Job: {executingJob.title}
                                                         </div>
-                                                    ))}
-                                                </div>
-                                            </Card>
-                                        )}
-
-                                        {/* Logs */}
-                                        {jobLogs.length > 0 && (
-                                            <Card>
-                                                <CardHeader className="pb-3">
-                                                    <div className="flex items-center gap-2 text-sm font-semibold">
-                                                        <FileText className="h-4 w-4" />
-                                                        Logs (Last {Math.min(jobLogs.length, 5)})
+                                                        <Badge
+                                                            variant={
+                                                                executingJob.status === 'SUCCESS' ? 'default' :
+                                                                    executingJob.status === 'FAILED' ? 'destructive' :
+                                                                        'secondary'
+                                                            }
+                                                            className={
+                                                                executingJob.status === 'SUCCESS' ? 'bg-green-600' :
+                                                                    executingJob.status === 'RUNNING' ? 'bg-blue-500' :
+                                                                        ''
+                                                            }
+                                                        >
+                                                            {executingJob.status}
+                                                        </Badge>
                                                     </div>
                                                 </CardHeader>
-                                                <div className="p-4 pt-0">
-                                                    <div className="bg-black/90 rounded-md p-3 max-h-[200px] overflow-auto font-mono text-xs">
-                                                        {jobLogs.slice(-5).map((log, i) => (
-                                                            <div key={i} className="mb-1">
-                                                                <span className="text-gray-500">{new Date(log.created_at).toLocaleTimeString()}</span>
-                                                                <span className={`ml-2 font-bold ${log.level === 'ERROR' ? 'text-red-500' : 'text-blue-400'}`}>
-                                                                    [{log.level}]
-                                                                </span>
-                                                                <span className="ml-2 text-gray-300">{log.message}</span>
+                                            </Card>
+
+                                            {/* Tasks */}
+                                            {jobTasks.length > 0 && (
+                                                <Card>
+                                                    <CardHeader className="pb-3">
+                                                        <div className="flex items-center gap-2 text-sm font-semibold">
+                                                            <Activity className="h-4 w-4" />
+                                                            Tasks ({jobTasks.filter(t => t.status === 'SUCCESS').length}/{jobTasks.length} completed)
+                                                        </div>
+                                                    </CardHeader>
+                                                    <div className="p-4 pt-0 space-y-2">
+                                                        {jobTasks.map(task => (
+                                                            <div key={task.id} className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                                                                {task.status === 'SUCCESS' && <CheckCircle className="h-4 w-4 text-green-500" />}
+                                                                {task.status === 'FAILED' && <XCircle className="h-4 w-4 text-red-500" />}
+                                                                {task.status === 'RUNNING' && <Activity className="h-4 w-4 text-blue-500 animate-pulse" />}
+                                                                {task.status === 'PENDING' && <Clock className="h-4 w-4 text-gray-400" />}
+                                                                <span className="text-sm font-medium">{task.name}</span>
+                                                                <Badge variant="outline" className="text-[10px] ml-auto">{task.status}</Badge>
                                                             </div>
                                                         ))}
                                                     </div>
-                                                </div>
-                                            </Card>
-                                        )}
+                                                </Card>
+                                            )}
 
-                                        {/* Artifacts */}
-                                        {jobArtifacts.length > 0 && (
-                                            <Card>
-                                                <CardHeader className="pb-3">
-                                                    <div className="flex items-center gap-2 text-sm font-semibold">
-                                                        <FileText className="h-4 w-4" />
-                                                        Artifacts ({jobArtifacts.length})
-                                                    </div>
-                                                </CardHeader>
-                                                <div className="p-4 pt-0">
-                                                    <div className="grid grid-cols-2 gap-2">
-                                                        {jobArtifacts.map(artifact => (
-                                                            <div
-                                                                key={artifact.id}
-                                                                className="p-2 border rounded text-xs bg-card hover:border-indigo-500 cursor-pointer transition-all"
-                                                                onClick={() => viewArtifact(artifact)}
-                                                            >
-                                                                <div className="flex justify-between items-start mb-1">
-                                                                    <Badge variant="secondary" className="text-[10px]">{artifact.type}</Badge>
-                                                                    {artifact.role && <Badge variant="outline" className="text-[10px]">{artifact.role}</Badge>}
+                                            {/* Logs */}
+                                            {jobLogs.length > 0 && (
+                                                <Card>
+                                                    <CardHeader className="pb-3">
+                                                        <div className="flex items-center gap-2 text-sm font-semibold">
+                                                            <FileText className="h-4 w-4" />
+                                                            Logs (Last {Math.min(jobLogs.length, 5)})
+                                                        </div>
+                                                    </CardHeader>
+                                                    <div className="p-4 pt-0">
+                                                        <div className="bg-black/90 rounded-md p-3 max-h-[200px] overflow-auto font-mono text-xs">
+                                                            {jobLogs.slice(-5).map((log, i) => (
+                                                                <div key={i} className="mb-1">
+                                                                    <span className="text-gray-500">{new Date(log.created_at).toLocaleTimeString()}</span>
+                                                                    <span className={`ml-2 font-bold ${log.level === 'ERROR' ? 'text-red-500' : 'text-blue-400'}`}>
+                                                                        [{log.level}]
+                                                                    </span>
+                                                                    <span className="ml-2 text-gray-300">{log.message}</span>
                                                                 </div>
-                                                                <p className="truncate font-medium">{artifact.filename}</p>
-                                                            </div>
-                                                        ))}
+                                                            ))}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </Card>
-                                        )}
-                                    </div>
-                                )}
+                                                </Card>
+                                            )}
+
+                                            {/* Artifacts */}
+                                            {jobArtifacts.length > 0 && (
+                                                <Card>
+                                                    <CardHeader className="pb-3">
+                                                        <div className="flex items-center gap-2 text-sm font-semibold">
+                                                            <FileText className="h-4 w-4" />
+                                                            Artifacts ({jobArtifacts.length})
+                                                        </div>
+                                                    </CardHeader>
+                                                    <div className="p-4 pt-0">
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            {jobArtifacts.map(artifact => (
+                                                                <div
+                                                                    key={artifact.id}
+                                                                    className="p-2 border rounded text-xs bg-card hover:border-indigo-500 cursor-pointer transition-all"
+                                                                    onClick={() => viewArtifact(artifact)}
+                                                                >
+                                                                    <div className="flex justify-between items-start mb-1">
+                                                                        <Badge variant="secondary" className="text-[10px]">{artifact.type}</Badge>
+                                                                        {artifact.role && <Badge variant="outline" className="text-[10px]">{artifact.role}</Badge>}
+                                                                    </div>
+                                                                    <p className="truncate font-medium">{artifact.filename}</p>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </Card>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </TabsContent>
                         </Tabs>
                     </div>
                 </div>
 
-                <DialogFooter className="p-4 border-t bg-muted/10">
+                <DialogFooter className="p-4 border-t shrink-0">
                     {error && <span className="text-sm text-destructive mr-auto flex items-center self-center">{error}</span>}
                     <Button variant="ghost" onClick={handleClose}>
                         {executingJob ? "Close & Reset" : "Cancel"}

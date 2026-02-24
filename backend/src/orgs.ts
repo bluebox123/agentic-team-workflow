@@ -15,11 +15,57 @@ export async function getDefaultOrgId(userId: string): Promise<string> {
     [userId]
   );
 
-  if (!rows.length) {
+  if (rows.length) {
+    return rows[0].organization_id;
+  }
+
+  const isDev = (process.env.NODE_ENV || "").toLowerCase() !== "production";
+  if (!isDev) {
     throw new Error("User has no organization");
   }
 
-  return rows[0].organization_id;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Ensure the user exists (email can be null for local dev)
+    await client.query(
+      `
+      INSERT INTO users (id)
+      VALUES ($1)
+      ON CONFLICT (id) DO NOTHING
+      `,
+      [userId]
+    );
+
+    // Create a personal org + membership (idempotent)
+    const orgRes = await client.query(
+      `
+      INSERT INTO organizations (name)
+      VALUES ('Personal')
+      RETURNING id
+      `
+    );
+
+    const orgId = orgRes.rows[0].id as string;
+
+    await client.query(
+      `
+      INSERT INTO organization_members (organization_id, user_id, role)
+      VALUES ($1, $2, 'OWNER')
+      ON CONFLICT (organization_id, user_id) DO NOTHING
+      `,
+      [orgId, userId]
+    );
+
+    await client.query("COMMIT");
+    return orgId;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**

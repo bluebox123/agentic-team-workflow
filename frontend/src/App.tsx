@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchJobs, fetchJobTasks, cancelJob, pauseJob, resumeJob, deleteJob, type Job, type Task } from './api/jobs';
-import { fetchWorkflows, createWorkflow, runWorkflow, fetchWorkflowVersion, type WorkflowTemplate } from './api/workflows';
+import { fetchWorkflows, createWorkflow, runWorkflow, fetchWorkflowVersion, fetchWorkflow, createWorkflowFromJob, type WorkflowTemplate, type DagDefinition } from './api/workflows';
 import { fetchArtifacts, fetchArtifactBlob, fetchArtifactText, type Artifact } from './api/artifacts';
 import { fetchDLQ } from './api/dlq';
 import { retryTask, skipTask, failTask, reviewTask } from './api/tasks';
@@ -16,7 +16,9 @@ import { ModeToggle } from "@/components/mode-toggle"
 import { CreateJobDialog } from "@/components/create-job-dialog"
 import { BrainPanel } from "@/components/BrainPanel";
 // import { TiltCard } from "@/components/tilt-card" // Removed 3D effect
-import { LayoutDashboard, Activity, AlertCircle, FileText, Layers, RefreshCcw, LogOut, Play, CheckCircle, XCircle, Sparkles } from "lucide-react";
+import { LayoutDashboard, Activity, AlertCircle, FileText, Layers, RefreshCcw, LogOut, Play, CheckCircle, XCircle, Sparkles, Save } from "lucide-react";
+import { WorkflowBuilder } from "@/components/WorkflowBuilder";
+import type { WorkflowDAG } from "./api/brain";
 
 function getErrorMessage(e: unknown): string {
   if (typeof e === 'string') return e;
@@ -55,7 +57,7 @@ function App() {
   const [refreshInterval, setRefreshInterval] = useState<number | null>(null);
   const [logsInterval, setLogsInterval] = useState<number | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'jobs' | 'workflows' | 'dlq' | 'brain'>('jobs');
+  const [activeTab, setActiveTab] = useState<'jobs' | 'workflows' | 'dlq' | 'brain' | 'help'>('brain');
   const [jobsScope, setJobsScope] = useState<'mine' | 'org'>(() => (localStorage.getItem('jobsScope') as 'mine' | 'org') || 'mine');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +72,16 @@ function App() {
   const [runPlaceholders, setRunPlaceholders] = useState<string[]>([]);
   const [runParams, setRunParams] = useState<Record<string, string>>({});
   const [runError, setRunError] = useState<string | null>(null);
+
+  // Save job as template modal state
+  const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
+  const [saveTemplateJobId, setSaveTemplateJobId] = useState<string | null>(null);
+  const [saveTemplateError, setSaveTemplateError] = useState<string | null>(null);
+
+  // Template detail modal state
+  const [showTemplateDetailModal, setShowTemplateDetailModal] = useState(false);
+  const [templateDetail, setTemplateDetail] = useState<{ id: string; name: string; description: string | null; version: number; dag: DagDefinition } | null>(null);
+  const [templateDetailError, setTemplateDetailError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -177,6 +189,53 @@ function App() {
     }
   };
 
+  const openSaveTemplateModal = (jobId: string) => {
+    setSaveTemplateError(null);
+    setSaveTemplateJobId(jobId);
+    setShowSaveTemplateModal(true);
+  };
+
+  const submitSaveTemplate = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!saveTemplateJobId) return;
+    setSaveTemplateError(null);
+    try {
+      const form = e.currentTarget;
+      const name = (form.elements.namedItem('template_name') as HTMLInputElement).value;
+      const description = (form.elements.namedItem('template_description') as HTMLInputElement).value;
+      await createWorkflowFromJob({ jobId: saveTemplateJobId, name, description: description || undefined });
+      setShowSaveTemplateModal(false);
+      loadData();
+    } catch (err) {
+      setSaveTemplateError(getErrorMessage(err));
+    }
+  };
+
+  const openTemplateDetail = async (wf: WorkflowTemplate) => {
+    setTemplateDetailError(null);
+    try {
+      const detail = await fetchWorkflow(wf.id);
+      const versions = Array.isArray(detail.versions) ? detail.versions : [];
+      const latest = versions.length ? Math.max(...versions.map(v => v.version)) : 1;
+      const { dag } = await fetchWorkflowVersion(wf.id, latest);
+      setTemplateDetail({ id: wf.id, name: wf.name, description: wf.description, version: latest, dag });
+      setShowTemplateDetailModal(true);
+    } catch (err) {
+      setTemplateDetailError(getErrorMessage(err));
+    }
+  };
+
+  const runFromTemplateDetail = async () => {
+    if (!templateDetail) return;
+    try {
+      await runWorkflow(templateDetail.id, { version: templateDetail.version, title: `${templateDetail.name} run` });
+      setShowTemplateDetailModal(false);
+      loadData();
+    } catch (err) {
+      setTemplateDetailError(getErrorMessage(err));
+    }
+  };
+
   const downloadArtifact = async (artifact: Artifact) => {
     try {
       const blob = await fetchArtifactBlob(artifact.id);
@@ -194,7 +253,9 @@ function App() {
   };
 
   const handleLogin = () => {
-    localStorage.setItem('token', token);
+    const normalized = token.trim();
+    localStorage.setItem('token', normalized);
+    setToken(normalized);
     setIsAuthenticated(true);
     loadData();
   };
@@ -450,14 +511,17 @@ function App() {
           </div>
 
           <nav className="flex items-center gap-2">
+            <Button variant={activeTab === 'brain' ? "secondary" : "ghost"} size="sm" onClick={() => setActiveTab('brain')}>
+              <Sparkles className="mr-2 h-4 w-4 text-indigo-400" /> AI Creator
+            </Button>
             <Button variant={activeTab === 'jobs' ? "secondary" : "ghost"} size="sm" onClick={() => setActiveTab('jobs')}>
               <LayoutDashboard className="mr-2 h-4 w-4" /> Jobs
             </Button>
             <Button variant={activeTab === 'workflows' ? "secondary" : "ghost"} size="sm" onClick={() => setActiveTab('workflows')}>
               <FileText className="mr-2 h-4 w-4" /> Workflows
             </Button>
-            <Button variant={activeTab === 'brain' ? "secondary" : "ghost"} size="sm" onClick={() => setActiveTab('brain')}>
-              <Sparkles className="mr-2 h-4 w-4 text-indigo-400" /> AI Creator
+            <Button variant={activeTab === 'help' ? "secondary" : "ghost"} size="sm" onClick={() => setActiveTab('help')}>
+              <FileText className="mr-2 h-4 w-4" /> How to use
             </Button>
             <Button variant={activeTab === 'dlq' ? "secondary" : "ghost"} size="sm" onClick={() => { setActiveTab('dlq'); loadDLQ(); }}>
               <AlertCircle className="mr-2 h-4 w-4" /> DLQ
@@ -540,6 +604,11 @@ function App() {
                       <CardDescription>{selectedJob.id}</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">
+                      <div className="flex gap-2">
+                        <Button variant="secondary" size="sm" onClick={() => openSaveTemplateModal(selectedJob.id)}>
+                          <Save className="mr-2 h-4 w-4" /> Save as Template
+                        </Button>
+                      </div>
                       <div>
                         <h4 className="text-sm font-medium mb-3 text-muted-foreground uppercase tracking-wider">Tasks</h4>
                         <div className="space-y-2">
@@ -621,7 +690,7 @@ function App() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {workflows.map(wf => (
-                  <Card key={wf.id} className="hover:shadow-lg transition-shadow">
+                  <Card key={wf.id} className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => openTemplateDetail(wf)}>
                     <CardHeader>
                       <CardTitle className="text-lg">{wf.name}</CardTitle>
                       <CardDescription>{wf.description || "No description"}</CardDescription>
@@ -634,7 +703,15 @@ function App() {
                     </CardContent>
                     <CardFooter className="flex gap-2 flex-wrap">
                       {[...Array(wf.version_count)].map((_, i) => (
-                        <Button key={i} variant="secondary" size="sm" onClick={() => openRunModal(wf.id, i + 1, wf.name)}>
+                        <Button
+                          key={i}
+                          variant="secondary"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openRunModal(wf.id, i + 1, wf.name);
+                          }}
+                        >
                           Run v{i + 1}
                         </Button>
                       ))}
@@ -642,6 +719,9 @@ function App() {
                   </Card>
                 ))}
               </div>
+              {templateDetailError && (
+                <div className="text-sm text-destructive">{templateDetailError}</div>
+              )}
             </div>
           )}
 
@@ -676,6 +756,107 @@ function App() {
 
           {activeTab === 'brain' && (
             <BrainPanel />
+          )}
+
+          {activeTab === 'help' && (
+            <div className="max-w-4xl mx-auto space-y-6">
+              <div className="space-y-2">
+                <h2 className="text-2xl font-bold tracking-tight">How to use this system</h2>
+                <p className="text-sm text-muted-foreground">
+                  This app lets you build and run multi-step AI workflows locally. The simplest way is AI Creator. For full control, use Manual Jobs.
+                </p>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">1) AI Creator (recommended)</CardTitle>
+                  <CardDescription>Describe what you want in plain English, then run the generated workflow.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <div>
+                    <span className="font-medium">Step A:</span> Open the <span className="font-mono">AI Creator</span> tab and enter a prompt.
+                  </div>
+                  <div>
+                    <span className="font-medium">Step B:</span> Click <span className="font-mono">Generate Plan</span> to preview the workflow.
+                  </div>
+                  <div>
+                    <span className="font-medium">Step C:</span> Click <span className="font-mono">Execute Workflow</span>.
+                  </div>
+                  <div>
+                    <span className="font-medium">Tip:</span> After a successful run, click <span className="font-mono">Save as Template</span> to reuse it later.
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">2) Manual Jobs (visual builder or list)</CardTitle>
+                  <CardDescription>Build the workflow yourself for maximum control.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <div>
+                    <span className="font-medium">Step A:</span> Go to <span className="font-mono">Jobs</span> and click <span className="font-mono">+ New Job</span>.
+                  </div>
+                  <div>
+                    <span className="font-medium">Step B:</span> Use <span className="font-mono">Visual Builder</span> to drag agents, connect them, and fill inputs.
+                  </div>
+                  <div>
+                    <span className="font-medium">Auto-wiring:</span> When you connect nodes, inputs are auto-filled with templates like <span className="font-mono">{'{{tasks.upstream.outputs.field}}'}</span>.
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">3) Templates (Workflows tab)</CardTitle>
+                  <CardDescription>Save a job as a template and run it again with one click.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <div>
+                    <span className="font-medium">Save:</span> From a job detail panel (or AI Creator run), click <span className="font-mono">Save as Template</span>.
+                  </div>
+                  <div>
+                    <span className="font-medium">View:</span> Go to <span className="font-mono">Workflows</span> and click a template.
+                  </div>
+                  <div>
+                    <span className="font-medium">Run:</span> Click <span className="font-mono">Run</span> in the template details modal.
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">4) Reports & Artifacts (PDFs, charts, JSON)</CardTitle>
+                  <CardDescription>Artifacts are files produced by tasks (PDF reports, charts, JSON outputs).</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <div>
+                    <span className="font-medium">Designer:</span> Produces a PDF report. In workflows, prefer connecting charts into designer so the PDF embeds them.
+                  </div>
+                  <div>
+                    <span className="font-medium">Artifacts:</span> Open a job, then click an artifact to preview or download it.
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">5) Notifier (sending results)</CardTitle>
+                  <CardDescription>Use notifier as the last step to email the result link (and attach the PDF when available).</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <div>
+                    <span className="font-medium">Typical pattern:</span> <span className="font-mono">{'designer -> notifier'}</span>
+                  </div>
+                  <div>
+                    <span className="font-medium">Message content:</span> If you connect designer into notifier, it will auto-fill a message containing the PDF link.
+                  </div>
+                  <div>
+                    <span className="font-medium">Recipients:</span> Set <span className="font-mono">channel=email</span> and add one or more emails in <span className="font-mono">recipients</span>.
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           )}
 
           {selectedArtifact && (
@@ -750,6 +931,73 @@ function App() {
                   <Button variant="ghost" onClick={() => setShowCreateWorkflow(false)}>Cancel</Button>
                   <Button type="submit" form="createWorkflowForm">Create</Button>
                 </CardFooter>
+              </Card>
+            </div>
+          )}
+
+          {showSaveTemplateModal && (
+            <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowSaveTemplateModal(false)}>
+              <Card className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+                <CardHeader>
+                  <CardTitle>Save Job as Template</CardTitle>
+                  <CardDescription>Save this job configuration so you can re-run it later.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={submitSaveTemplate} id="saveTemplateForm" className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Template name</label>
+                      <Input name="template_name" required defaultValue={selectedJob ? selectedJob.title : ''} />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Description</label>
+                      <Input name="template_description" />
+                    </div>
+                    {saveTemplateError && (
+                      <div className="text-sm text-destructive">{saveTemplateError}</div>
+                    )}
+                  </form>
+                </CardContent>
+                <CardFooter className="flex justify-end gap-2">
+                  <Button variant="ghost" onClick={() => setShowSaveTemplateModal(false)}>Cancel</Button>
+                  <Button type="submit" form="saveTemplateForm">Save</Button>
+                </CardFooter>
+              </Card>
+            </div>
+          )}
+
+          {showTemplateDetailModal && templateDetail && (
+            <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowTemplateDetailModal(false)}>
+              <Card className="w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                <CardHeader>
+                  <CardTitle className="flex justify-between items-center">
+                    <span>{templateDetail.name}</span>
+                    <div className="flex gap-2">
+                      <Button variant="secondary" onClick={runFromTemplateDetail}>Run</Button>
+                      <Button variant="ghost" onClick={() => setShowTemplateDetailModal(false)}>Close</Button>
+                    </div>
+                  </CardTitle>
+                  <CardDescription>{templateDetail.description || 'No description'}</CardDescription>
+                </CardHeader>
+                <CardContent className="flex-1 overflow-auto space-y-4">
+                  {typeof templateDetail.dag?.meta?.prompt === 'string' && (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">Prompt</div>
+                      <pre className="text-xs p-3 bg-black/50 rounded overflow-auto">{String(templateDetail.dag.meta.prompt)}</pre>
+                    </div>
+                  )}
+
+                  {templateDetail.dag?.meta?.visualDag && typeof templateDetail.dag.meta.visualDag === 'object' ? (
+                    <div className="h-[520px] border rounded-lg overflow-hidden">
+                      <WorkflowBuilder workflow={templateDetail.dag.meta.visualDag as unknown as WorkflowDAG} mode="view" readOnly />
+                    </div>
+                  ) : (
+                    <pre className="text-xs p-3 bg-black/50 rounded overflow-auto">{JSON.stringify(templateDetail.dag, null, 2)}</pre>
+                  )}
+
+                  {templateDetailError && (
+                    <div className="text-sm text-destructive">{templateDetailError}</div>
+                  )}
+                </CardContent>
               </Card>
             </div>
           )}

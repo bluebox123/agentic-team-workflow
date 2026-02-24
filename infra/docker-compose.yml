@@ -67,7 +67,10 @@ services:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: artifacts
+      MINIO_USE_SSL: "false"
       # AI API Keys
+      AI_PROVIDER: perplexity
+      PPLX_API_KEY: ${PPLX_API_KEY}
       GEMINI_API_KEY: AIzaSyCUHB2jgFLSV65fOKyK_Yy8qO3a_9y8XXY
       GEMINI_MODEL: gemini-2.0-flash-exp
       SAMBANOVA_API_KEY: a9b0b0b0-53b5-446d-8f78-b6fc59f49a88

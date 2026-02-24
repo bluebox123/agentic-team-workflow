@@ -8,6 +8,18 @@ import { requireOrgRole } from "./orgAccess";
 
 const router = Router();
 
+type DagTask = {
+  name: string;
+  parent_task_index?: number;
+  agent_type?: string;
+  payload?: Record<string, unknown>;
+};
+
+type WorkflowDag = {
+  tasks: DagTask[];
+  meta?: Record<string, unknown>;
+};
+
 function substituteParams(obj: any, params: Record<string, any>): any {
   if (typeof obj === "string") {
     return obj.replace(/\{\{(\w+)\}\}/g, (_, key) => {
@@ -32,6 +44,138 @@ function substituteParams(obj: any, params: Record<string, any>): any {
 
   return obj;
 }
+
+/**
+ * POST /api/workflows/from-job
+ * Snapshot an existing job into a workflow template (version 1)
+ */
+router.post("/from-job", async (req: AuthRequest, res) => {
+  const { jobId, name, description, prompt, visualDag } = req.body as {
+    jobId?: unknown;
+    name?: unknown;
+    description?: unknown;
+    prompt?: unknown;
+    visualDag?: unknown;
+  };
+
+  if (typeof jobId !== "string" || !jobId) {
+    return res.status(400).json({ error: "Missing jobId" });
+  }
+  if (typeof name !== "string" || !name.trim()) {
+    return res.status(400).json({ error: "Missing name" });
+  }
+  if (description !== undefined && description !== null && typeof description !== "string") {
+    return res.status(400).json({ error: "Invalid description" });
+  }
+  if (prompt !== undefined && prompt !== null && typeof prompt !== "string") {
+    return res.status(400).json({ error: "Invalid prompt" });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: jobRows } = await client.query(
+      `
+      SELECT id, organization_id
+      FROM jobs
+      WHERE id = $1
+      `,
+      [jobId]
+    );
+
+    if (!jobRows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Job not found" });
+    }
+
+    const jobOrgId = jobRows[0].organization_id as string | null;
+    const ownerOrgId = await getDefaultOrgId(req.user!.id);
+
+    // Only allow saving templates into the user's default org. (Consistent with create workflow template)
+    await requireOrgRole(req.user!.id, ownerOrgId, ["OWNER", "ADMIN"]);
+
+    // If job belongs to an org, ensure user is a member of that org (can view the job)
+    if (jobOrgId) {
+      await requireOrgRole(req.user!.id, jobOrgId, ["OWNER", "ADMIN", "MEMBER"]);
+    }
+
+    const { rows: taskRows } = await client.query(
+      `
+      SELECT id, name, agent_type, payload, parent_task_id, order_index
+      FROM tasks
+      WHERE job_id = $1
+      ORDER BY order_index ASC
+      `,
+      [jobId]
+    );
+
+    if (!taskRows.length) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Job has no tasks" });
+    }
+
+    const indexByTaskId = new Map<string, number>();
+    for (let i = 0; i < taskRows.length; i++) {
+      const id = taskRows[i].id as string;
+      indexByTaskId.set(id, i);
+    }
+
+    const dagTasks: DagTask[] = taskRows.map((t: any) => {
+      const parentId = typeof t.parent_task_id === "string" ? (t.parent_task_id as string) : null;
+      const parentIndex = parentId ? indexByTaskId.get(parentId) : undefined;
+
+      return {
+        name: t.name,
+        parent_task_index: typeof parentIndex === "number" ? parentIndex : undefined,
+        agent_type: t.agent_type,
+        payload: (t.payload ?? undefined) as Record<string, unknown> | undefined,
+      };
+    });
+
+    const dag: WorkflowDag = {
+      tasks: dagTasks,
+      meta: {
+        sourceJobId: jobId,
+        ...(typeof prompt === "string" ? { prompt } : {}),
+        ...(visualDag !== undefined ? { visualDag } : {}),
+      },
+    };
+
+    const templateId = uuidv4();
+    const versionId = uuidv4();
+
+    await client.query(
+      `
+      INSERT INTO workflow_templates (
+        id, owner_id, organization_id, name, description
+      )
+      VALUES ($1, $2, $3, $4, $5)
+      `,
+      [templateId, req.user!.id, ownerOrgId, name.trim(), typeof description === "string" ? description : null]
+    );
+
+    await client.query(
+      `
+      INSERT INTO workflow_template_versions (
+        id, template_id, version, dag
+      )
+      VALUES ($1, $2, 1, $3)
+      `,
+      [versionId, templateId, dag]
+    );
+
+    await client.query("COMMIT");
+
+    res.status(201).json({ templateId, version: 1 });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("[WORKFLOW FROM JOB ERROR]", err);
+    res.status(500).json({ error: "Failed to create workflow template from job" });
+  } finally {
+    client.release();
+  }
+});
 
 /**
  * POST /api/workflows

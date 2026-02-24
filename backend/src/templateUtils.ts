@@ -33,7 +33,29 @@ export async function resolveTaskInputs(
     for (const row of rows) {
         // Handle both flat and nested result structures
         // The result from DB might be: { result: actualData } or actualData directly
-        const rawResult = row.result ? (row.result.result || row.result) : {};
+        let rawResult: any = row.result ? row.result : {};
+        // Only unwrap a { result: ... } wrapper if it looks like a pure wrapper.
+        // Many tasks store additional fields alongside `result` (e.g. ok, executor, transformed).
+        // Unwrapping those would break templates like tasks.transformer.outputs.result[*].name.
+        if (
+            rawResult &&
+            typeof rawResult === "object" &&
+            !Array.isArray(rawResult) &&
+            "result" in rawResult &&
+            Object.keys(rawResult).length === 1
+        ) {
+            rawResult = (rawResult as any).result;
+        }
+        // Normalize primitives to objects so downstream debug + template access doesn't crash.
+        // Some tasks store result as a string (e.g. executor), which would break 'in' operator and Object.keys.
+        if (rawResult === null || rawResult === undefined) {
+            rawResult = {};
+        } else if (typeof rawResult !== "object") {
+            rawResult = {
+                result: rawResult,
+                text: typeof rawResult === "string" ? rawResult : undefined,
+            };
+        }
 
         console.log(`[TEMPLATE] Task '${row.name}': result type=${typeof row.result}, has result.result=${!!row.result?.result}`);
         console.log(`[TEMPLATE] Task '${row.name}': raw result keys=${Object.keys(rawResult).join(', ')}`);
@@ -100,19 +122,67 @@ export async function resolveTaskInputs(
 
 export function substitute(obj: any, context: any): any {
     if (typeof obj === "string") {
-        // Regex to match {{ path.to.value }}
-        // We'll support simple dot notation
-        return obj.replace(/\{\{([\w\.]+)\}\}/g, (match, path) => {
-            const val = getPath(context, path);
-            console.log(`[TEMPLATE] Looking up path '${path}', got type=${typeof val}, value=${JSON.stringify(val)?.substring(0, 50)}`);
+        const evalExpr = (expr: string): any => {
+            // Support JSONPath-like projections produced by some planners:
+            // e.g. tasks.transformer.outputs.result[*].name
+            // We interpret that as: getPath(...result) then map('name').
+            let projectionField: string | null = null;
+            const projectionMatch = expr.match(/\[\*\]\.([a-zA-Z0-9_]+)(\.|$)/);
+            if (projectionMatch) {
+                projectionField = projectionMatch[1];
+                expr = expr.replace(/\[\*\]\.[a-zA-Z0-9_]+/g, "");
+            }
+
+            const parts = expr.split("|").map(p => p.trim()).filter(Boolean);
+            if (!parts.length) return undefined;
+
+            let val = getPath(context, parts[0]);
+
+            if (projectionField && Array.isArray(val)) {
+                val = val.map((v: any) => (v && typeof v === "object") ? v[projectionField!] : undefined);
+            }
+
+            for (let i = 1; i < parts.length; i++) {
+                const op = parts[i];
+                const mapMatch = op.match(/^map\((['\"])(.+?)\1\)$/);
+                if (mapMatch) {
+                    const field = mapMatch[2];
+                    if (Array.isArray(val)) {
+                        val = val.map((v: any) => (v && typeof v === "object") ? v[field] : undefined);
+                    }
+                    continue;
+                }
+
+                if (op === "list") {
+                    // no-op, kept for compatibility with planner output
+                    continue;
+                }
+            }
+            return val;
+        };
+
+        // If the whole string is a single template, return the underlying value directly
+        // so downstream tasks can receive arrays/objects instead of JSON strings.
+        const whole = obj.match(/^\{\{([^}]+)\}\}$/);
+        if (whole) {
+            const expr = String(whole[1]).trim();
+            const val = evalExpr(expr);
+            console.log(`[TEMPLATE] Whole-template '${expr}' -> type=${typeof val}`);
+            return val !== undefined && val !== null && val !== "" ? val : obj;
+        }
+
+        // Otherwise, do string interpolation.
+        return obj.replace(/\{\{([^}]+)\}\}/g, (match, exprRaw) => {
+            const expr = String(exprRaw).trim();
+            const val = evalExpr(expr);
+            console.log(`[TEMPLATE] Looking up expr '${expr}', got type=${typeof val}, value=${JSON.stringify(val)?.substring(0, 50)}`);
             if (val !== undefined && val !== null && val !== '') {
-                // Serialize objects/arrays as JSON; primitives as string
                 const serialized = typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val);
-                console.log(`[TEMPLATE] Resolved {{${path}}} -> ${serialized.substring(0, 80)}`);
+                console.log(`[TEMPLATE] Resolved {{${expr}}} -> ${serialized.substring(0, 80)}`);
                 return serialized;
             } else {
-                console.log(`[TEMPLATE] NOT FOUND or EMPTY: {{${path}}} - val=${JSON.stringify(val)} - keeping original`);
-                return match; // keep original if not found
+                console.log(`[TEMPLATE] NOT FOUND or EMPTY: {{${expr}}} - val=${JSON.stringify(val)} - keeping original`);
+                return match;
             }
         });
     }

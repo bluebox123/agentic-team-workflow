@@ -11,4 +11,7 @@ __pycache__/
 
 backend/.env
 
+infra/.env
+**/.env
+
 workers/python_worker/.env

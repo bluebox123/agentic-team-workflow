@@ -17,17 +17,19 @@ import ReactFlow, {
     type NodeTypes,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { 
-    Trash2, 
-    Settings, 
-    Play, 
-    Download, 
+import {
+    Trash2,
+    Settings,
+    Play,
+    Download,
     MousePointer2,
     GripVertical,
     Plus,
     X,
     Sparkles,
     Layout,
+    Maximize2,
+    Minimize2,
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -100,7 +102,7 @@ const AGENT_TYPES: AgentType[] = [
         inputs: [
             { name: 'text', type: 'string', required: false, description: 'Text content to analyze' },
             { name: 'data', type: 'array', required: false, description: 'Structured data for analysis' },
-            { name: 'context', type: 'string', required: false, description: 'Additional context' }
+            { name: 'analysis_type', type: 'string', required: false, description: 'Analysis type (e.g. summary)' }
         ]
     },
     {
@@ -111,9 +113,14 @@ const AGENT_TYPES: AgentType[] = [
         color: '#8b5cf6',
         gradient: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
         inputs: [
-            { name: 'data', type: 'array', required: true, description: 'Data points or series' },
-            { name: 'type', type: 'string', required: true, description: 'Chart type (bar, line, pie, etc)' },
-            { name: 'title', type: 'string', required: true, description: 'Chart title' },
+            { name: 'type', type: 'string', required: false, description: 'Chart type (bar, line, pie, etc)' },
+            { name: 'title', type: 'string', required: false, description: 'Chart title' },
+            { name: 'text', type: 'string', required: false, description: 'Instruction/context (optional)' },
+            { name: 'role', type: 'string', required: true, description: 'Artifact role (used by designer)' },
+            { name: 'x', type: 'array', required: false, description: 'X values (for bar/line/scatter/area)' },
+            { name: 'y', type: 'array', required: false, description: 'Y values (for bar/line/scatter/area)' },
+            { name: 'labels', type: 'array', required: false, description: 'Labels (for pie)' },
+            { name: 'values', type: 'array', required: false, description: 'Values (for pie/histogram)' },
             { name: 'x_label', type: 'string', required: false, description: 'X-axis label' },
             { name: 'y_label', type: 'string', required: false, description: 'Y-axis label' }
         ]
@@ -153,7 +160,7 @@ const AGENT_TYPES: AgentType[] = [
         gradient: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
         inputs: [
             { name: 'data', type: 'unknown', required: true, description: 'Data to validate' },
-            { name: 'schema', type: 'object', required: true, description: 'Validation schema' }
+            { name: 'rules', type: 'object', required: true, description: 'Validation rules / JSON schema' }
         ]
     },
     {
@@ -165,7 +172,7 @@ const AGENT_TYPES: AgentType[] = [
         gradient: 'linear-gradient(135deg, #ec4899 0%, #db2777 100%)',
         inputs: [
             { name: 'data', type: 'unknown', required: true, description: 'Data to transform' },
-            { name: 'operation', type: 'string', required: true, description: 'Transform operation' }
+            { name: 'transform', type: 'string', required: true, description: 'Transform (e.g. uppercase, lowercase, ai:...)' }
         ]
     },
     {
@@ -178,8 +185,9 @@ const AGENT_TYPES: AgentType[] = [
         inputs: [
             { name: 'message', type: 'string', required: true, description: 'Message to send' },
             { name: 'channel', type: 'string', required: true, description: 'Notification channel' }
-            ,{ name: 'recipients', type: 'array', required: true, description: 'Recipients (email addresses)' }
-            ,{ name: 'subject', type: 'string', required: false, description: 'Email subject' }
+            , { name: 'recipients', type: 'array', required: false, description: 'Recipients (email addresses)' }
+            , { name: 'recipient', type: 'string', required: false, description: 'Legacy single recipient' }
+            , { name: 'subject', type: 'string', required: false, description: 'Email subject' }
         ]
     }
 ];
@@ -212,13 +220,13 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
                 className="!w-3 !h-3 !bg-muted-foreground !border-2 !border-background"
                 style={{ top: -6 }}
             />
-            
+
             {/* Node Content */}
             <div className="flex flex-col">
                 {/* Header */}
                 <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
-                        <div 
+                        <div
                             className="w-8 h-8 rounded flex items-center justify-center text-lg"
                             style={{ background: agentType.gradient, opacity: 0.9 }}
                         >
@@ -253,12 +261,12 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
                         </div>
                     )}
                 </div>
-                
+
                 {/* Title */}
                 <div className="text-sm font-medium text-foreground mb-1 truncate">
                     {agentType.name}
                 </div>
-                
+
                 {/* Inputs Preview */}
                 <div className="text-[10px] text-muted-foreground bg-muted/50 rounded px-2 py-1.5 max-h-[60px] overflow-hidden">
                     {Object.keys(data.inputs).length > 0 ? (
@@ -280,7 +288,7 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
                     )}
                 </div>
             </div>
-            
+
             {/* Source Handle */}
             <Handle
                 type="source"
@@ -295,6 +303,142 @@ const AgentNode = ({ data, selected, id }: { data: AgentNodeData; selected?: boo
 const nodeTypes: NodeTypes = {
     agent: AgentNode,
 };
+
+function isEmptyValue(v: unknown): boolean {
+    if (v === undefined || v === null) return true;
+    if (typeof v === 'string') return v.trim() === '';
+    if (Array.isArray(v)) return v.length === 0;
+    if (typeof v === 'object') return Object.keys(v as Record<string, unknown>).length === 0;
+    return false;
+}
+
+const AGENT_OUTPUTS: Record<string, string[]> = {
+    scraper: ['text', 'html', 'url'],
+    summarizer: ['summary', 'original_length'],
+    analyzer: ['stats', 'insights'],
+    transformer: ['result', 'transformed'],
+    validator: ['valid', 'errors', 'warnings', 'error_count', 'warning_count'],
+    chart: ['image_url', 'description', 'role'],
+    designer: ['pdf_url'],
+    notifier: ['status'],
+    reviewer: ['decision', 'score', 'feedback'],
+    executor: ['result'],
+};
+
+function makeOutputTemplate(sourceId: string, field: string) {
+    return `{{tasks.${sourceId}.outputs.${field}}}`;
+}
+
+function chooseFirstAvailableOutput(sourceAgentType: string, preferred: string[]): string | null {
+    const outputs = AGENT_OUTPUTS[sourceAgentType] ?? [];
+    for (const p of preferred) {
+        if (outputs.includes(p)) return p;
+    }
+    return outputs.length > 0 ? outputs[0] : null;
+}
+
+function inferAutoWiring(params: {
+    sourceNodeId: string;
+    sourceAgentType: string;
+    sourceInputs: Record<string, unknown>;
+    targetAgentType: string;
+    existingTargetInputs: Record<string, unknown>;
+}): Record<string, unknown> {
+    const { sourceNodeId, sourceAgentType, sourceInputs, targetAgentType, existingTargetInputs } = params;
+
+    const nextInputs: Record<string, unknown> = { ...existingTargetInputs };
+    const setIfEmpty = (key: string, value: unknown) => {
+        if (!(key in nextInputs) || isEmptyValue(nextInputs[key])) nextInputs[key] = value;
+    };
+
+    // Most agents accept upstream data via a "text" or "data" input. Prefer richer fields.
+    if (targetAgentType === 'summarizer') {
+        const out = chooseFirstAvailableOutput(sourceAgentType, ['text', 'summary', 'insights', 'result']);
+        if (out) setIfEmpty('text', makeOutputTemplate(sourceNodeId, out));
+    }
+
+    if (targetAgentType === 'analyzer') {
+        const out = chooseFirstAvailableOutput(sourceAgentType, ['text', 'summary', 'insights', 'result']);
+        if (out) setIfEmpty('text', makeOutputTemplate(sourceNodeId, out));
+        setIfEmpty('analysis_type', 'summary');
+    }
+
+    if (targetAgentType === 'transformer') {
+        const out = chooseFirstAvailableOutput(sourceAgentType, ['result', 'text', 'summary', 'insights']);
+        if (out) setIfEmpty('data', makeOutputTemplate(sourceNodeId, out));
+        setIfEmpty('transform', 'ai:Transform the input into a clean JSON array or object suitable for the next step');
+    }
+
+    if (targetAgentType === 'validator') {
+        const out = chooseFirstAvailableOutput(sourceAgentType, ['result', 'transformed', 'stats']);
+        if (out) setIfEmpty('data', makeOutputTemplate(sourceNodeId, out));
+        // rules cannot be inferred safely; user must provide
+    }
+
+    if (targetAgentType === 'chart') {
+        // Chart expects either x/y or labels/values; we can't infer series reliably. Use text instruction from upstream.
+        const out = chooseFirstAvailableOutput(sourceAgentType, ['insights', 'summary', 'text', 'result']);
+        if (out) setIfEmpty('text', makeOutputTemplate(sourceNodeId, out));
+        setIfEmpty('type', 'bar');
+        setIfEmpty('title', 'Chart');
+        setIfEmpty('role', `chart_${Date.now()}`);
+    }
+
+    if (targetAgentType === 'designer') {
+        // Designer always wants sections; create a basic section referencing upstream output.
+        const out = chooseFirstAvailableOutput(sourceAgentType, ['summary', 'insights', 'text', 'result', 'pdf_url', 'image_url']);
+        setIfEmpty('title', 'Report');
+
+        const existingSections = Array.isArray(nextInputs.sections) ? (nextInputs.sections as unknown[]) : [];
+        const canAppend = existingSections.length > 0;
+
+        // Special-case: chart -> designer should embed via artifact reference (not a URL string)
+        if (sourceAgentType === 'chart') {
+            const role = typeof sourceInputs.role === 'string' && sourceInputs.role.trim() ? sourceInputs.role.trim() : null;
+            const section = role
+                ? { heading: 'Chart', artifact: { type: 'chart', role } }
+                : { heading: 'Chart', content: makeOutputTemplate(sourceNodeId, 'image_url') };
+
+            if (canAppend) {
+                const next = [...existingSections, section];
+                nextInputs.sections = next;
+            } else {
+                nextInputs.sections = [section];
+            }
+        } else if (out) {
+            const section = { heading: 'Results', content: makeOutputTemplate(sourceNodeId, out) };
+            if (canAppend) {
+                const next = [...existingSections, section];
+                nextInputs.sections = next;
+            } else {
+                setIfEmpty('sections', [section]);
+            }
+        }
+    }
+
+    if (targetAgentType === 'notifier') {
+        // If notifying after designer, send pdf_url.
+        if (sourceAgentType === 'designer') {
+            setIfEmpty('message', `Your report is ready: ${makeOutputTemplate(sourceNodeId, 'pdf_url')}`);
+        } else {
+            const out = chooseFirstAvailableOutput(sourceAgentType, ['result', 'summary', 'insights', 'text']);
+            if (out) setIfEmpty('message', makeOutputTemplate(sourceNodeId, out));
+        }
+        setIfEmpty('channel', 'email');
+    }
+
+    if (targetAgentType === 'reviewer') {
+        // target_task_id is injected by backend based on dependency; do nothing.
+        setIfEmpty('score_threshold', 80);
+    }
+
+    if (targetAgentType === 'executor') {
+        const out = chooseFirstAvailableOutput(sourceAgentType, ['text', 'summary', 'insights', 'result']);
+        if (out) setIfEmpty('context', makeOutputTemplate(sourceNodeId, out));
+    }
+
+    return nextInputs;
+}
 
 // ============================================
 // DRAG & DROP TOOLBAR
@@ -315,7 +459,7 @@ function AgentToolbar() {
                 </h3>
                 <p className="text-xs text-muted-foreground mt-1">Drag to add nodes</p>
             </div>
-            
+
             <ScrollArea className="flex-1 p-3">
                 <div className="space-y-2">
                     {AGENT_TYPES.map((agent) => (
@@ -326,7 +470,7 @@ function AgentToolbar() {
                             className="group p-3 rounded-lg border bg-card hover:bg-accent cursor-grab active:cursor-grabbing transition-all hover:border-muted-foreground/30"
                         >
                             <div className="flex items-start gap-3">
-                                <div 
+                                <div
                                     className="w-8 h-8 rounded flex items-center justify-center text-lg"
                                     style={{ background: agent.gradient, opacity: 0.8 }}
                                 >
@@ -366,7 +510,7 @@ function NodePropertiesPanel({
     onClose: () => void;
 }) {
     const agentType = node ? (AGENT_TYPES.find(a => a.id === node.data.agentType) || AGENT_TYPES[0]) : null;
-    
+
     // Directly use node data - changes are applied immediately via onChange
     const inputs = useMemo(() => node?.data.inputs ?? {}, [node?.data.inputs]);
 
@@ -405,7 +549,7 @@ function NodePropertiesPanel({
         <div className="w-80 bg-background border-l flex flex-col">
             <div className="p-4 border-b flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                    <div 
+                    <div
                         className="w-8 h-8 rounded flex items-center justify-center text-lg"
                         style={{ background: agentType.gradient, opacity: 0.8 }}
                     >
@@ -423,12 +567,36 @@ function NodePropertiesPanel({
 
             <ScrollArea className="flex-1 p-4">
                 <div className="space-y-4">
+                    {/* Required Inputs */}
+                    {agentType.inputs.some(i => i.required) && (
+                        <div className="p-3 rounded-lg border bg-muted/30">
+                            <div className="flex items-center justify-between mb-2">
+                                <Label className="text-xs text-muted-foreground">Required Inputs</Label>
+                                <Badge variant="outline" className="text-[10px]">
+                                    {agentType.inputs.filter(i => i.required).filter(i => inputs[i.name] !== undefined && inputs[i.name] !== null && String(inputs[i.name]).trim?.() !== "").length}/{agentType.inputs.filter(i => i.required).length}
+                                </Badge>
+                            </div>
+                            <div className="space-y-1">
+                                {agentType.inputs.filter(i => i.required).map((i) => {
+                                    const v = (inputs as Record<string, unknown>)[i.name];
+                                    const ok = v !== undefined && v !== null && (typeof v !== "string" || v.trim() !== "");
+                                    return (
+                                        <div key={i.name} className="flex items-center justify-between text-xs">
+                                            <span className="font-mono">{i.name}</span>
+                                            <span className={cn("text-[10px]", ok ? "text-emerald-500" : "text-destructive")}>{ok ? "OK" : "Missing"}</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Node ID */}
                     <div>
                         <Label className="text-xs text-muted-foreground">Node ID</Label>
-                        <Input 
-                            value={node.id} 
-                            disabled 
+                        <Input
+                            value={node.id}
+                            disabled
                             className="mt-1.5 bg-muted text-muted-foreground text-xs"
                         />
                     </div>
@@ -461,7 +629,7 @@ function NodePropertiesPanel({
                                 {Object.keys(inputs).length}
                             </Badge>
                         </div>
-                        
+
                         <div className="space-y-2">
                             {Object.entries(inputs).map(([key, value]) => (
                                 <div key={key} className="p-2 rounded-lg bg-muted/50 border group">
@@ -494,7 +662,7 @@ function NodePropertiesPanel({
                                     />
                                 </div>
                             ))}
-                            
+
                             {Object.keys(inputs).length === 0 && (
                                 <div className="text-center py-4 text-muted-foreground text-xs">
                                     No inputs configured yet
@@ -508,7 +676,7 @@ function NodePropertiesPanel({
                     {/* Add Custom Input */}
                     <div>
                         <Label className="text-xs text-muted-foreground mb-2 block">Add Custom Input</Label>
-                        <form 
+                        <form
                             onSubmit={(e) => {
                                 e.preventDefault();
                                 const form = e.target as HTMLFormElement;
@@ -520,7 +688,7 @@ function NodePropertiesPanel({
                             }}
                             className="flex gap-2"
                         >
-                            <Input 
+                            <Input
                                 name="key"
                                 placeholder="input_name"
                                 className="flex-1 bg-muted text-xs"
@@ -561,16 +729,16 @@ function FlowCanvas({
     // Convert initial workflow to nodes/edges (without handlers first)
     const getInitialNodes = useCallback((): Node<AgentNodeData>[] => {
         if (!initialWorkflow?.nodes) return [];
-        
+
         return initialWorkflow.nodes.map((node, index) => {
             const agentType = AGENT_TYPES.find(a => a.id === node.agentType) || AGENT_TYPES[0];
             const xGap = 280;
-            
+
             return {
                 id: node.id,
                 type: 'agent',
-                position: { 
-                    x: index * xGap, 
+                position: {
+                    x: index * xGap,
                     y: 100 + (index % 2) * 50
                 },
                 data: {
@@ -585,7 +753,7 @@ function FlowCanvas({
 
     const getInitialEdges = useCallback((): Edge[] => {
         if (!initialWorkflow?.edges) return [];
-        
+
         return initialWorkflow.edges.map(edge => ({
             id: `${edge.from}-${edge.to}`,
             source: edge.from,
@@ -702,7 +870,7 @@ function FlowCanvas({
             if (visited.has(nodeId)) return;
 
             tempVisited.add(nodeId);
-            
+
             // Visit dependencies first
             const deps = workflowEdges.filter(e => e.to === nodeId).map(e => e.from);
             for (const dep of deps) {
@@ -748,6 +916,38 @@ function FlowCanvas({
             style: { stroke: '#667eea', strokeWidth: 3 },
             markerEnd: { type: MarkerType.ArrowClosed, color: '#667eea' }
         }, eds));
+
+        const sourceId = params.source;
+        const targetId = params.target;
+        if (!sourceId || !targetId) return;
+
+        setNodes((nds) => {
+            const sourceNode = nds.find((n) => n.id === sourceId);
+            const targetNode = nds.find((n) => n.id === targetId);
+            if (!sourceNode || !targetNode) return nds;
+
+            const nextInputs = inferAutoWiring({
+                sourceNodeId: sourceId,
+                sourceAgentType: sourceNode.data.agentType,
+                sourceInputs: (sourceNode.data.inputs ?? {}) as Record<string, unknown>,
+                targetAgentType: targetNode.data.agentType,
+                existingTargetInputs: targetNode.data.inputs ?? {},
+            });
+
+            // Avoid triggering re-renders if nothing changes
+            if (JSON.stringify(nextInputs) === JSON.stringify(targetNode.data.inputs ?? {})) return nds;
+
+            const nextData: AgentNodeData = {
+                ...targetNode.data,
+                inputs: nextInputs,
+            };
+
+            // Keep the properties panel in sync
+            const event = new CustomEvent('nodeDataChange', { detail: { id: targetId, data: nextData } });
+            window.dispatchEvent(event);
+
+            return nds.map((n) => (n.id === targetId ? { ...n, data: nextData } : n));
+        });
     }, [setEdges]);
 
     const onDragOver = useCallback((event: React.DragEvent) => {
@@ -784,8 +984,8 @@ function FlowCanvas({
     }, [fitView]);
 
     return (
-        <div className="flex-1 flex flex-col">
-            <div ref={reactFlowWrapper} className="flex-1">
+        <div className="flex-1 flex flex-col min-h-0">
+            <div ref={reactFlowWrapper} className="flex-1 min-h-0">
                 <ReactFlow
                     nodes={nodes}
                     edges={edges}
@@ -806,16 +1006,17 @@ function FlowCanvas({
                     snapToGrid
                     snapGrid={[15, 15]}
                     className="workflow-builder"
+                    style={{ width: '100%', height: '100%' }}
                 >
                     <Background
                         color="#475569"
                         gap={20}
                         style={{ opacity: 0.4 }}
                     />
-                    <Controls 
+                    <Controls
                         className="!bg-background !border !shadow-md"
                     />
-                    
+
                     {/* Stats Panel */}
                     <Panel position="top-left" className="m-4">
                         <div className="bg-card border rounded-lg p-3 shadow-md">
@@ -870,6 +1071,7 @@ export function WorkflowBuilder({
     const [selectedNode, setSelectedNode] = useState<Node<AgentNodeData> | null>(null);
     const [activeMode, setActiveMode] = useState<BuilderMode>(mode);
     const [exportedWorkflow, setExportedWorkflow] = useState<WorkflowDAG | null>(null);
+    const [isFullscreen, setIsFullscreen] = useState(false);
 
     const handleWorkflowChange = useCallback((newWorkflow: WorkflowDAG) => {
         setExportedWorkflow(newWorkflow);
@@ -895,7 +1097,12 @@ export function WorkflowBuilder({
     };
 
     return (
-        <div className="flex flex-col h-full overflow-hidden bg-background border rounded-lg">
+        <div className={cn(
+            "flex flex-col bg-background border",
+            isFullscreen
+                ? "fixed inset-4 z-[100] rounded-xl shadow-2xl"
+                : "h-full min-h-0 overflow-hidden rounded-lg"
+        )}>
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 bg-muted border-b">
                 <div className="flex items-center gap-3">
@@ -908,8 +1115,8 @@ export function WorkflowBuilder({
                             onClick={() => setActiveMode('build')}
                             className={cn(
                                 "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-                                activeMode === 'build' 
-                                    ? "bg-primary text-primary-foreground" 
+                                activeMode === 'build'
+                                    ? "bg-primary text-primary-foreground"
                                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
                             )}
                         >
@@ -919,8 +1126,8 @@ export function WorkflowBuilder({
                             onClick={() => setActiveMode('view')}
                             className={cn(
                                 "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-                                activeMode === 'view' 
-                                    ? "bg-primary text-primary-foreground" 
+                                activeMode === 'view'
+                                    ? "bg-primary text-primary-foreground"
                                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
                             )}
                         >
@@ -928,10 +1135,19 @@ export function WorkflowBuilder({
                         </button>
                     </div>
                 </div>
-                
+
                 <div className="flex items-center gap-2">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setIsFullscreen(!isFullscreen)}
+                        className="px-2"
+                        title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+                    >
+                        {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                    </Button>
                     {onExecute && (
-                        <Button 
+                        <Button
                             onClick={handleExecute}
                             disabled={!exportedWorkflow || exportedWorkflow.nodes.length === 0}
                             size="sm"
@@ -941,8 +1157,8 @@ export function WorkflowBuilder({
                             Execute
                         </Button>
                     )}
-                    <Button 
-                        variant="outline" 
+                    <Button
+                        variant="outline"
                         size="sm"
                         onClick={handleExport}
                         disabled={!exportedWorkflow || exportedWorkflow.nodes.length === 0}
@@ -954,9 +1170,9 @@ export function WorkflowBuilder({
             </div>
 
             {/* Main Content */}
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 min-h-0 flex overflow-hidden">
                 {activeMode === 'build' && !readOnly && <AgentToolbar />}
-                
+
                 <ReactFlowProvider>
                     <FlowCanvas
                         initialWorkflow={workflow}
@@ -964,13 +1180,13 @@ export function WorkflowBuilder({
                         setSelectedNode={setSelectedNode}
                     />
                 </ReactFlowProvider>
-                
+
                 {activeMode === 'build' && !readOnly && (
                     <NodePropertiesPanel
                         node={selectedNode}
                         onChange={(id, data) => {
-                            const event = new CustomEvent('nodeDataChange', { 
-                                detail: { id, data } 
+                            const event = new CustomEvent('nodeDataChange', {
+                                detail: { id, data }
                             });
                             window.dispatchEvent(event);
                         }}
