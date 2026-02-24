@@ -35,12 +35,19 @@ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1NTBlODQwMC1lMjliLTQxZDQtYTcxNi0
 ### Step 3: Run a sample prompt
 Copy any of the **8 sample prompts** below.
 
+Where to paste it:
+
+- **AI Creator / Brain Panel (recommended):** Paste the prompt and click **Execute**. The system will auto-plan a workflow DAG.
+- **Manual Job Builder (advanced):** Build the same workflow yourself by adding agents (tasks) and configuring each payload.
+
+Manual Job Builder tips:
+
+- **Job title is required**.
+- Add tasks in the order you want them to run.
+- Use `parent_task_index` (or the visual connections) to set dependencies.
+- When using `designer`, include sections and optionally embed artifacts by role (e.g. a `chart` with role `chart`).
+
 ---
-
-## 8 sample prompts for testing
-
-These prompts are designed to trigger **4-6 agents** working together, producing downloadable artifacts and email notifications.
-
 ### Prompt 1 — Website → Summary → Insights → PDF Report → Email
 **Agents:** `scraper` + `summarizer` + `analyzer` + `chart` + `designer` + `notifier`
 
@@ -264,14 +271,38 @@ User Prompt → Brain/Planner (LLM) → Workflow DAG → Orchestrator → Rabbit
    - Paste one of the 8 sample prompts above
    - Click **Execute**
 
-4. **Monitor progress**:
-   - Watch the **Workflow DAG** visualization
-   - See real-time task status updates via WebSocket
-   - Each agent completes and passes data to the next
+### Manual job creation (no AI planning)
 
-5. **Download results**:
-   - PDF reports appear in the artifacts panel
-   - Check your email for the final report attachment
+Use this when you want full control over the DAG or you’re demoing the system without relying on the planner.
+
+1. **Go to the Jobs area**:
+   - Open the **Create New Job** dialog
+
+2. **Enter a title**:
+   - The UI will block submission if the title is empty.
+
+3. **Add tasks (agents) from the Task Library**:
+   - Common demo chain:
+     - `scraper` -> `summarizer` -> `analyzer` -> `chart` -> `designer` -> `notifier`
+
+4. **Configure each task payload**:
+   - Use the form fields (or JSON) to set required inputs.
+   - If you want charts to reliably appear in the PDF, set a stable chart `role` and reference that role in the `designer` sections.
+
+5. **Start the job**:
+   - Click **Start Job**.
+   - The dialog switches to an **Execution** tab with task statuses, logs, and artifacts.
+
+### Monitor progress (applies to both)
+
+- Watch the **Workflow DAG** visualization
+- See real-time task status updates via WebSocket
+- Each agent completes and passes data to the next
+
+### Download results (applies to both)
+
+- PDF reports appear in the artifacts panel
+- Check your email for the final report attachment
 
 ---
 
